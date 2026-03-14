@@ -1,0 +1,1354 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>機器貸出管理</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<style>
+  :root {
+    --bg: #f0f2f5;
+    --card: #ffffff;
+    --primary: #1a56db;
+    --primary-dark: #1340a8;
+    --danger: #e02424;
+    --success: #057a55;
+    --warning: #c27803;
+    --text: #111928;
+    --text-sub: #6b7280;
+    --border: #e5e7eb;
+    --loan: #fef3c7;
+    --loan-text: #92400e;
+    --in: #d1fae5;
+    --in-text: #065f46;
+    --radius: 12px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    font-family: 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+
+  /* Header */
+  .header {
+    background: var(--primary);
+    color: white;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow-lg);
+  }
+  .header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
+  .header-back {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* Nav */
+  .nav {
+    background: white;
+    display: flex;
+    border-top: 1px solid var(--border);
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 480px;
+    z-index: 100;
+  }
+  .nav-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 4px 14px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: var(--text-sub);
+    font-size: 10px;
+    gap: 4px;
+    transition: color 0.15s;
+  }
+  .nav-btn.active { color: var(--primary); }
+  .nav-btn svg { width: 22px; height: 22px; }
+  .nav-scan {
+    background: var(--primary);
+    border-radius: 50%;
+    width: 52px;
+    height: 52px;
+    margin-top: -16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(26,86,219,0.4);
+    flex-direction: column;
+    color: white;
+    font-size: 9px;
+    gap: 2px;
+  }
+
+  /* Content */
+  .content {
+    padding: 16px 16px 100px;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .card-header {
+    padding: 14px 16px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-sub);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Stats */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .stat-card {
+    background: white;
+    border-radius: var(--radius);
+    padding: 14px 12px;
+    text-align: center;
+    box-shadow: var(--shadow);
+  }
+  .stat-num { font-size: 28px; font-weight: 800; color: var(--primary); line-height: 1; }
+  .stat-label { font-size: 11px; color: var(--text-sub); margin-top: 4px; }
+  .stat-card.warn .stat-num { color: var(--warning); }
+  .stat-card.danger .stat-num { color: var(--danger); }
+
+  /* Device items */
+  .device-item {
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .device-item:last-child { border-bottom: none; }
+  .device-item:active { background: var(--bg); }
+  .device-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .device-icon.loan { background: var(--loan); }
+  .device-icon.in { background: var(--in); }
+  .device-info { flex: 1; min-width: 0; }
+  .device-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .device-meta { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
+  .device-label { font-size: 11px; font-family: monospace; color: var(--text-sub); }
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 20px;
+    flex-shrink: 0;
+  }
+  .badge.loan { background: var(--loan); color: var(--loan-text); }
+  .badge.in { background: var(--in); color: var(--in-text); }
+  .badge.overdue { background: #fde8e8; color: var(--danger); }
+
+  /* Search */
+  .search-box {
+    background: white;
+    border-radius: var(--radius);
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: var(--shadow);
+    margin-bottom: 12px;
+  }
+  .search-box svg { color: var(--text-sub); flex-shrink: 0; width: 18px; height: 18px; }
+  .search-box input {
+    flex: 1;
+    border: none;
+    outline: none;
+    padding: 13px 0;
+    font-size: 15px;
+    font-family: inherit;
+    color: var(--text);
+    background: none;
+  }
+
+  /* Filter tabs */
+  .filter-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .filter-tabs::-webkit-scrollbar { display: none; }
+  .filter-tab {
+    border: none;
+    padding: 7px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    background: white;
+    color: var(--text-sub);
+    box-shadow: var(--shadow);
+    transition: all 0.15s;
+  }
+  .filter-tab.active { background: var(--primary); color: white; }
+
+  /* Forms */
+  .form-section {
+    margin-bottom: 20px;
+  }
+  .form-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-sub);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .required { color: var(--danger); }
+  .form-input {
+    width: 100%;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 15px;
+    font-family: inherit;
+    color: var(--text);
+    outline: none;
+    background: white;
+    transition: border-color 0.15s;
+    -webkit-appearance: none;
+  }
+  .form-input:focus { border-color: var(--primary); }
+  .form-select {
+    width: 100%;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 15px;
+    font-family: inherit;
+    color: var(--text);
+    outline: none;
+    background: white;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 40px;
+  }
+  .form-radio-group {
+    display: flex;
+    gap: 10px;
+  }
+  .radio-btn {
+    flex: 1;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text-sub);
+    background: white;
+  }
+  .radio-btn.selected { border-color: var(--primary); color: var(--primary); background: #eff6ff; }
+
+  /* Buttons */
+  .btn {
+    width: 100%;
+    padding: 15px;
+    border-radius: 12px;
+    border: none;
+    font-size: 16px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-primary:active { background: var(--primary-dark); transform: scale(0.98); }
+  .btn-danger { background: var(--danger); color: white; }
+  .btn-danger:active { transform: scale(0.98); }
+  .btn-secondary { background: var(--bg); color: var(--text); }
+  .btn-secondary:active { transform: scale(0.98); }
+  .btn-outline {
+    background: white;
+    border: 1.5px solid var(--primary);
+    color: var(--primary);
+  }
+
+  /* QR Scanner */
+  .scanner-wrap {
+    position: relative;
+    background: black;
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 16px;
+    aspect-ratio: 1;
+  }
+  #qr-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scanner-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .scanner-frame {
+    width: 60%;
+    aspect-ratio: 1;
+    border: 3px solid white;
+    border-radius: 16px;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.4);
+  }
+  .scanner-label-input {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .scanner-label-input input { flex: 1; }
+  .scanner-label-input button {
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 0 16px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  /* Detail */
+  .detail-hero {
+    background: linear-gradient(135deg, var(--primary) 0%, #1340a8 100%);
+    color: white;
+    padding: 24px 20px;
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+  }
+  .detail-hero-label { font-size: 12px; opacity: 0.7; margin-bottom: 4px; font-family: monospace; }
+  .detail-hero-name { font-size: 22px; font-weight: 800; margin-bottom: 12px; }
+  .detail-hero-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+  .detail-hero-badge {
+    background: rgba(255,255,255,0.2);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .detail-hero-badge.status-loan { background: #fbbf24; color: #78350f; }
+  .detail-hero-badge.status-in { background: #34d399; color: #064e3b; }
+
+  .info-row {
+    display: flex;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+  }
+  .info-row:last-child { border-bottom: none; }
+  .info-key { font-size: 13px; color: var(--text-sub); width: 90px; flex-shrink: 0; padding-top: 1px; }
+  .info-val { font-size: 14px; font-weight: 500; flex: 1; }
+
+  .history-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .history-item:last-child { border-bottom: none; }
+  .history-type {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    margin-bottom: 4px;
+  }
+  .history-type.loan { background: var(--loan); color: var(--loan-text); }
+  .history-type.ret { background: var(--in); color: var(--in-text); }
+  .history-detail { font-size: 13px; color: var(--text-sub); }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1f2937;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 1000;
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    transition: opacity 0.3s;
+    white-space: nowrap;
+    pointer-events: none;
+    max-width: calc(100vw - 32px);
+  }
+  .toast.show { opacity: 1; }
+  .toast.success { background: var(--success); }
+  .toast.error { background: var(--danger); }
+
+  /* Empty state */
+  .empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-sub);
+  }
+  .empty svg { width: 48px; height: 48px; margin-bottom: 12px; opacity: 0.3; }
+  .empty p { font-size: 14px; }
+
+  /* Quick actions */
+  .quick-actions {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .quick-btn {
+    background: white;
+    border: none;
+    border-radius: var(--radius);
+    padding: 16px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    transition: all 0.15s;
+    text-align: left;
+  }
+  .quick-btn:active { transform: scale(0.97); }
+  .quick-btn-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .quick-btn-text { font-size: 13px; font-weight: 600; }
+  .quick-btn-sub { font-size: 11px; color: var(--text-sub); margin-top: 2px; }
+
+  /* Settings */
+  .settings-item {
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .settings-item:last-child { border-bottom: none; }
+  .settings-item:active { background: var(--bg); }
+  .settings-label { font-size: 15px; font-weight: 500; }
+  .settings-arrow { color: var(--text-sub); }
+
+  .section-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-sub);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 0 4px;
+    margin: 16px 0 8px;
+  }
+
+  .overdue-banner {
+    background: #fde8e8;
+    border: 1px solid #f98080;
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .overdue-banner svg { color: var(--danger); flex-shrink: 0; margin-top: 1px; }
+  .overdue-banner-text { font-size: 13px; color: #9b1c1c; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ========== DATA STORE ==========
+const DB_KEY = 'kiki_kanri_v1';
+
+function loadDB() {
+  try {
+    const d = localStorage.getItem(DB_KEY);
+    if (d) return JSON.parse(d);
+  } catch(e) {}
+  return {
+    devices: [],
+    loans: [],
+    salesReps: [
+      { id: 1, name: '山田 太郎', active: true },
+      { id: 2, name: '鈴木 花子', active: true },
+      { id: 3, name: '田中 次郎', active: true },
+    ],
+    nextDeviceId: 1,
+    nextLoanId: 1,
+    nextRepId: 4,
+  };
+}
+
+function saveDB(db) {
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
+}
+
+let db = loadDB();
+
+// ========== HELPERS ==========
+function genId(prefix, num) {
+  return prefix + String(num).padStart(6, '0');
+}
+
+function today() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function fmtDate(d) {
+  if (!d) return '—';
+  return d.replace(/-/g, '/');
+}
+
+function isOverdue(device) {
+  if (device.status !== '貸出中') return false;
+  if (!device.returnDueDate) return false;
+  return device.returnDueDate < today();
+}
+
+function getStats() {
+  const total = db.devices.length;
+  const loan = db.devices.filter(d => d.status === '貸出中').length;
+  const overdue = db.devices.filter(d => isOverdue(d)).length;
+  return { total, loan, overdue };
+}
+
+// ========== TOASTS ==========
+let toastTimer;
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = 'toast'; }, 2800);
+}
+
+// ========== ROUTER ==========
+let currentView = 'home';
+let viewStack = [];
+let viewData = {};
+
+function navigate(view, data = {}) {
+  viewStack.push({ view: currentView, data: viewData });
+  currentView = view;
+  viewData = data;
+  render();
+}
+
+function goBack() {
+  if (viewStack.length === 0) return;
+  const prev = viewStack.pop();
+  currentView = prev.view;
+  viewData = prev.data;
+  render();
+}
+
+function resetTo(view) {
+  viewStack = [];
+  currentView = view;
+  viewData = {};
+  render();
+}
+
+// ========== RENDER ==========
+function render() {
+  const app = document.getElementById('app');
+  // Stop any running QR scanner
+  stopScanner();
+  
+  const views = {
+    home: renderHome,
+    devices: renderDevices,
+    scanner: renderScanner,
+    deviceDetail: renderDeviceDetail,
+    loanForm: renderLoanForm,
+    returnForm: renderReturnForm,
+    registerForm: renderRegisterForm,
+    settings: renderSettings,
+    salesReps: renderSalesReps,
+  };
+
+  const fn = views[currentView] || renderHome;
+  app.innerHTML = fn();
+  afterRender();
+  window.scrollTo(0, 0);
+}
+
+function renderNav() {
+  const tabs = [
+    { id: 'home', label: 'ホーム', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>` },
+    { id: 'devices', label: '機器一覧', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>` },
+    { id: 'scanner', label: 'スキャン', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>` },
+    { id: 'settings', label: '設定', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>` },
+  ];
+
+  return `
+  <nav class="nav">
+    ${tabs.map((t, i) => {
+      if (i === 2) {
+        return `<button class="nav-btn" onclick="resetTo('scanner')">
+          <div class="nav-scan">
+            ${t.icon}
+            <span>${t.label}</span>
+          </div>
+        </button>`;
+      }
+      return `<button class="nav-btn ${currentView === t.id ? 'active' : ''}" onclick="resetTo('${t.id}')">
+        ${t.icon}
+        <span>${t.label}</span>
+      </button>`;
+    }).join('')}
+  </nav>`;
+}
+
+// ========== HOME ==========
+function renderHome() {
+  const stats = getStats();
+  const loanDevices = db.devices.filter(d => d.status === '貸出中').slice(0, 5);
+  const overdueDevices = db.devices.filter(d => isOverdue(d));
+
+  return `
+  <div class="header">
+    <h1>機器貸出管理</h1>
+    <span style="font-size:12px;opacity:0.8;">${today().replace(/-/g,'/')}</span>
+  </div>
+  <div class="content">
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-num">${stats.total}</div>
+        <div class="stat-label">登録機器数</div>
+      </div>
+      <div class="stat-card warn">
+        <div class="stat-num">${stats.loan}</div>
+        <div class="stat-label">貸出中</div>
+      </div>
+      <div class="stat-card ${stats.overdue > 0 ? 'danger' : ''}">
+        <div class="stat-num">${stats.overdue}</div>
+        <div class="stat-label">期限超過</div>
+      </div>
+    </div>
+
+    ${overdueDevices.length > 0 ? `
+    <div class="overdue-banner">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div class="overdue-banner-text">返却期限を超過している機器が ${overdueDevices.length} 件あります</div>
+    </div>` : ''}
+
+    <div class="quick-actions">
+      <button class="quick-btn" onclick="navigate('scanner', {mode:'loan'})">
+        <div class="quick-btn-icon" style="background:#eff6ff;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#1a56db" stroke-width="2" width="22" height="22"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+        </div>
+        <div>
+          <div class="quick-btn-text">貸出登録</div>
+          <div class="quick-btn-sub">QRをスキャン</div>
+        </div>
+      </button>
+      <button class="quick-btn" onclick="navigate('scanner', {mode:'return'})">
+        <div class="quick-btn-icon" style="background:#f0fdf4;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#057a55" stroke-width="2" width="22" height="22"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+        </div>
+        <div>
+          <div class="quick-btn-text">返却登録</div>
+          <div class="quick-btn-sub">QRをスキャン</div>
+        </div>
+      </button>
+    </div>
+
+    ${loanDevices.length > 0 ? `
+    <div class="section-title">貸出中の機器</div>
+    <div class="card">
+      ${loanDevices.map(d => `
+      <div class="device-item" onclick="navigate('deviceDetail', {deviceId:${d.id}})">
+        <div class="device-icon loan">📦</div>
+        <div class="device-info">
+          <div class="device-name">${d.name}</div>
+          <div class="device-meta">${d.loanTo || '—'} / ${d.salesRep || '—'}</div>
+          <div class="device-label">${d.labelId}</div>
+        </div>
+        <span class="badge ${isOverdue(d) ? 'overdue' : 'loan'}">${isOverdue(d) ? '期限超過' : '貸出中'}</span>
+      </div>`).join('')}
+    </div>` : `
+    <div class="card">
+      <div class="empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <p>現在貸出中の機器はありません</p>
+      </div>
+    </div>`}
+  </div>
+  ${renderNav()}`;
+}
+
+// ========== DEVICES ==========
+function renderDevices() {
+  const filter = viewData.filter || 'all';
+  const search = viewData.search || '';
+
+  let devices = [...db.devices];
+  if (filter === 'loan') devices = devices.filter(d => d.status === '貸出中');
+  if (filter === 'in') devices = devices.filter(d => d.status === '社内');
+  if (filter === 'overdue') devices = devices.filter(d => isOverdue(d));
+  if (filter === 'nodate') devices = devices.filter(d => d.status === '貸出中' && !d.returnDueDate);
+  if (filter === 'maker') devices = devices.filter(d => d.type === 'メーカー借入' && d.status === '貸出中');
+  if (search) {
+    const q = search.toLowerCase();
+    devices = devices.filter(d => d.name.toLowerCase().includes(q) || d.labelId.toLowerCase().includes(q) || (d.loanTo||'').toLowerCase().includes(q));
+  }
+
+  return `
+  <div class="header">
+    <h1>機器一覧</h1>
+    <button class="header-back" onclick="navigate('registerForm', {})">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      機器登録
+    </button>
+  </div>
+  <div class="content">
+    <div class="search-box">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="search" placeholder="機器名・LabelID・貸出先" value="${search}" oninput="viewData.search=this.value;render()">
+    </div>
+    <div class="filter-tabs">
+      <button class="filter-tab ${filter==='all'?'active':''}" onclick="viewData.filter='all';render()">すべて(${db.devices.length})</button>
+      <button class="filter-tab ${filter==='loan'?'active':''}" onclick="viewData.filter='loan';render()">貸出中</button>
+      <button class="filter-tab ${filter==='overdue'?'active':''}" onclick="viewData.filter='overdue';render()">期限超過</button>
+      <button class="filter-tab ${filter==='nodate'?'active':''}" onclick="viewData.filter='nodate';render()">返却日未定</button>
+      <button class="filter-tab ${filter==='maker'?'active':''}" onclick="viewData.filter='maker';render()">メーカー借入</button>
+      <button class="filter-tab ${filter==='in'?'active':''}" onclick="viewData.filter='in';render()">社内</button>
+    </div>
+    ${devices.length > 0 ? `
+    <div class="card">
+      ${devices.map(d => `
+      <div class="device-item" onclick="navigate('deviceDetail', {deviceId:${d.id}})">
+        <div class="device-icon ${d.status==='貸出中'?'loan':'in'}">${d.type==='メーカー借入'?'🔧':'📦'}</div>
+        <div class="device-info">
+          <div class="device-name">${d.name}</div>
+          <div class="device-meta">${d.status==='貸出中' ? (d.loanTo||'—') : '社内保管'}${d.returnDueDate ? ' ・ ' + fmtDate(d.returnDueDate) + '返却予定' : ''}</div>
+          <div class="device-label">${d.labelId}</div>
+        </div>
+        <span class="badge ${isOverdue(d)?'overdue':d.status==='貸出中'?'loan':'in'}">${isOverdue(d)?'期限超過':d.status}</span>
+      </div>`).join('')}
+    </div>` : `
+    <div class="card">
+      <div class="empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <p>該当する機器がありません</p>
+      </div>
+    </div>`}
+  </div>
+  ${renderNav()}`;
+}
+
+// ========== SCANNER ==========
+let scannerActive = false;
+let scannerStream = null;
+let scannerMode = '';
+
+function stopScanner() {
+  scannerActive = false;
+  if (scannerStream) {
+    scannerStream.getTracks().forEach(t => t.stop());
+    scannerStream = null;
+  }
+}
+
+function renderScanner() {
+  const mode = viewData.mode || '';
+  scannerMode = mode;
+  const title = mode === 'loan' ? '貸出登録スキャン' : mode === 'return' ? '返却登録スキャン' : 'QRスキャン';
+
+  return `
+  <div class="header">
+    ${viewStack.length > 0 ? `<button class="header-back" onclick="goBack()">← 戻る</button>` : '<div></div>'}
+    <h1>${title}</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    <div class="scanner-wrap">
+      <video id="qr-video" autoplay playsinline muted></video>
+      <div class="scanner-overlay"><div class="scanner-frame"></div></div>
+    </div>
+    <p style="text-align:center;color:var(--text-sub);font-size:13px;margin-bottom:16px;">カメラをQRコードに向けてください</p>
+    <div style="text-align:center;margin-bottom:8px;font-size:13px;color:var(--text-sub);">― または LabelIDを直接入力 ―</div>
+    <div class="scanner-label-input">
+      <input class="form-input" id="manual-label" placeholder="例: BF-000001" style="text-transform:uppercase;">
+      <button onclick="handleManualLabel()">確認</button>
+    </div>
+    ${!mode ? `
+    <div class="section-title" style="margin-top:20px;">直接登録</div>
+    <button class="btn btn-primary" onclick="navigate('registerForm', {})">
+      ＋ 新規機器を登録する
+    </button>` : ''}
+  </div>
+  ${renderNav()}`;
+}
+
+function handleManualLabel() {
+  const val = document.getElementById('manual-label').value.trim().toUpperCase();
+  if (!val) return;
+  handleScannedLabel(val);
+}
+
+function handleScannedLabel(labelId) {
+  stopScanner();
+  const device = db.devices.find(d => d.labelId === labelId);
+  
+  if (scannerMode === 'loan') {
+    if (!device) {
+      if (confirm(`LabelID「${labelId}」は未登録です。\n新規機器として登録しますか？`)) {
+        navigate('registerForm', { labelId });
+      }
+      return;
+    }
+    if (device.status === '貸出中') {
+      showToast('この機器は現在貸出中です', 'error');
+      navigate('deviceDetail', { deviceId: device.id });
+      return;
+    }
+    navigate('loanForm', { deviceId: device.id });
+  } else if (scannerMode === 'return') {
+    if (!device) {
+      showToast('登録されていない機器です', 'error');
+      return;
+    }
+    if (device.status === '社内') {
+      showToast('この機器は既に社内にあります', 'error');
+      navigate('deviceDetail', { deviceId: device.id });
+      return;
+    }
+    navigate('returnForm', { deviceId: device.id });
+  } else {
+    if (!device) {
+      if (confirm(`LabelID「${labelId}」は未登録です。\n新規機器として登録しますか？`)) {
+        navigate('registerForm', { labelId });
+      }
+      return;
+    }
+    navigate('deviceDetail', { deviceId: device.id });
+  }
+}
+
+// ========== DEVICE DETAIL ==========
+function renderDeviceDetail() {
+  const device = db.devices.find(d => d.id === viewData.deviceId);
+  if (!device) return '<div class="content"><p>機器が見つかりません</p></div>';
+
+  const history = db.loans.filter(l => l.deviceId === device.id).sort((a,b) => b.date.localeCompare(a.date));
+
+  return `
+  <div class="header">
+    <button class="header-back" onclick="goBack()">← 戻る</button>
+    <h1>機器詳細</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    <div class="detail-hero">
+      <div class="detail-hero-label">${device.labelId}</div>
+      <div class="detail-hero-name">${device.name}</div>
+      <div class="detail-hero-badges">
+        <span class="detail-hero-badge status-${device.status==='貸出中'?'loan':'in'}">${isOverdue(device)?'期限超過':device.status}</span>
+        <span class="detail-hero-badge">${device.type}</span>
+        ${device.maker ? `<span class="detail-hero-badge">${device.maker}</span>` : ''}
+      </div>
+    </div>
+
+    ${device.status === '貸出中' ? `
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><span class="card-title">貸出情報</span></div>
+      <div class="info-row"><span class="info-key">貸出先</span><span class="info-val">${device.loanTo||'—'}</span></div>
+      <div class="info-row"><span class="info-key">担当者</span><span class="info-val">${device.salesRep||'—'}</span></div>
+      <div class="info-row"><span class="info-key">貸出日</span><span class="info-val">${fmtDate(device.loanDate)}</span></div>
+      <div class="info-row"><span class="info-key">返却予定</span><span class="info-val" style="${isOverdue(device)?'color:var(--danger);font-weight:700;':''}">${device.returnDueDate ? fmtDate(device.returnDueDate) : '未定'}</span></div>
+      ${device.notes ? `<div class="info-row"><span class="info-key">備考</span><span class="info-val">${device.notes}</span></div>` : ''}
+    </div>
+    <button class="btn btn-primary" style="margin-bottom:8px;" onclick="navigate('returnForm', {deviceId:${device.id}})">返却登録する</button>
+    ` : `
+    <button class="btn btn-outline" style="margin-bottom:12px;" onclick="navigate('loanForm', {deviceId:${device.id}})">この機器を貸出登録する</button>
+    `}
+
+    ${history.length > 0 ? `
+    <div class="section-title">貸出履歴</div>
+    <div class="card">
+      ${history.map(l => `
+      <div class="history-item">
+        <span class="history-type ${l.type==='貸出'?'loan':'ret'}">${l.type}</span>
+        <div class="history-detail">
+          ${l.type==='貸出' ? `${fmtDate(l.date)} ・ ${l.loanTo||'—'} ・ ${l.salesRep||'—'}` : `${fmtDate(l.date)} 返却`}
+        </div>
+      </div>`).join('')}
+    </div>` : ''}
+  </div>`;
+}
+
+// ========== LOAN FORM ==========
+function renderLoanForm() {
+  const device = db.devices.find(d => d.id === viewData.deviceId);
+  if (!device) return '';
+  const activeReps = db.salesReps.filter(r => r.active);
+
+  return `
+  <div class="header">
+    <button class="header-back" onclick="goBack()">← 戻る</button>
+    <h1>貸出登録</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    <div class="card" style="padding:14px 16px;margin-bottom:16px;">
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:2px;">${device.labelId}</div>
+      <div style="font-size:17px;font-weight:700;">${device.name}</div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-label">貸出先サロン名 <span class="required">*</span></div>
+      <input class="form-input" id="f-salon" placeholder="例: ○○サロン 渋谷店" autocomplete="off">
+    </div>
+    <div class="form-section">
+      <div class="form-label">営業担当 <span class="required">*</span></div>
+      <select class="form-select" id="f-rep">
+        <option value="">選択してください</option>
+        ${activeReps.map(r => `<option value="${r.name}">${r.name}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-section">
+      <div class="form-label">返却予定日 <span style="color:var(--text-sub);font-weight:400;">(未定の場合は空欄)</span></div>
+      <input class="form-input" id="f-duedate" type="date" min="${today()}">
+    </div>
+    <div class="form-section">
+      <div class="form-label">備考</div>
+      <input class="form-input" id="f-notes" placeholder="任意">
+    </div>
+    <button class="btn btn-primary" onclick="submitLoan(${device.id})">貸出登録する</button>
+  </div>`;
+}
+
+function submitLoan(deviceId) {
+  const salon = document.getElementById('f-salon').value.trim();
+  const rep = document.getElementById('f-rep').value;
+  const duedate = document.getElementById('f-duedate').value;
+  const notes = document.getElementById('f-notes').value.trim();
+
+  if (!salon) { showToast('貸出先サロン名を入力してください', 'error'); return; }
+  if (!rep) { showToast('営業担当を選択してください', 'error'); return; }
+
+  const device = db.devices.find(d => d.id === deviceId);
+  device.status = '貸出中';
+  device.loanTo = salon;
+  device.salesRep = rep;
+  device.loanDate = today();
+  device.returnDueDate = duedate || null;
+  device.notes = notes;
+
+  db.loans.push({
+    id: db.nextLoanId++,
+    deviceId,
+    labelId: device.labelId,
+    type: '貸出',
+    loanTo: salon,
+    salesRep: rep,
+    date: today(),
+    returnDueDate: duedate || null,
+    notes,
+  });
+
+  saveDB(db);
+  showToast('貸出登録しました ✓', 'success');
+  viewStack = [];
+  navigate('deviceDetail', { deviceId });
+}
+
+// ========== RETURN FORM ==========
+function renderReturnForm() {
+  const device = db.devices.find(d => d.id === viewData.deviceId);
+  if (!device) return '';
+
+  return `
+  <div class="header">
+    <button class="header-back" onclick="goBack()">← 戻る</button>
+    <h1>返却登録</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    <div class="card" style="padding:14px 16px;margin-bottom:16px;">
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:2px;">${device.labelId}</div>
+      <div style="font-size:17px;font-weight:700;">${device.name}</div>
+      <div style="font-size:13px;color:var(--text-sub);margin-top:4px;">${device.loanTo||''} より返却</div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-label">返却日</div>
+      <input class="form-input" id="f-retdate" type="date" value="${today()}">
+    </div>
+    <div class="form-section">
+      <div class="form-label">備考</div>
+      <input class="form-input" id="f-notes" placeholder="任意">
+    </div>
+    <button class="btn btn-danger" onclick="submitReturn(${device.id})">返却登録する</button>
+  </div>`;
+}
+
+function submitReturn(deviceId) {
+  const retdate = document.getElementById('f-retdate').value || today();
+  const notes = document.getElementById('f-notes').value.trim();
+
+  const device = db.devices.find(d => d.id === deviceId);
+  const prevLoanTo = device.loanTo;
+  device.status = '社内';
+  device.returnDate = retdate;
+  device.loanTo = null;
+  device.returnDueDate = null;
+  device.salesRep = null;
+
+  db.loans.push({
+    id: db.nextLoanId++,
+    deviceId,
+    labelId: device.labelId,
+    type: '返却',
+    loanTo: prevLoanTo,
+    date: retdate,
+    notes,
+  });
+
+  saveDB(db);
+  showToast('返却登録しました ✓', 'success');
+  viewStack = [];
+  navigate('deviceDetail', { deviceId });
+}
+
+// ========== REGISTER FORM ==========
+function renderRegisterForm() {
+  const labelId = viewData.labelId || '';
+
+  return `
+  <div class="header">
+    <button class="header-back" onclick="goBack()">← 戻る</button>
+    <h1>新規機器登録</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    <div class="form-section">
+      <div class="form-label">LabelID <span class="required">*</span></div>
+      <input class="form-input" id="f-labelid" placeholder="例: BF-000001" value="${labelId}" style="text-transform:uppercase;" autocomplete="off">
+    </div>
+    <div class="form-section">
+      <div class="form-label">機器名 <span class="required">*</span></div>
+      <input class="form-input" id="f-name" placeholder="例: ドライヤー Pro-X" autocomplete="off">
+    </div>
+    <div class="form-section">
+      <div class="form-label">区分 <span class="required">*</span></div>
+      <div class="form-radio-group">
+        <div class="radio-btn selected" id="type-own" onclick="selectType('自社')">自社</div>
+        <div class="radio-btn" id="type-maker" onclick="selectType('メーカー借入')">メーカー借入</div>
+      </div>
+      <input type="hidden" id="f-type" value="自社">
+    </div>
+    <div class="form-section">
+      <div class="form-label">メーカー名 <span style="color:var(--text-sub);font-weight:400;">(借入品は推奨)</span></div>
+      <input class="form-input" id="f-maker" placeholder="例: パナソニック">
+    </div>
+    <div class="form-section">
+      <div class="form-label">備考</div>
+      <input class="form-input" id="f-notes" placeholder="任意">
+    </div>
+    <button class="btn btn-primary" onclick="submitRegister()">機器を登録する</button>
+  </div>`;
+}
+
+function selectType(type) {
+  document.getElementById('f-type').value = type;
+  document.getElementById('type-own').className = 'radio-btn' + (type === '自社' ? ' selected' : '');
+  document.getElementById('type-maker').className = 'radio-btn' + (type === 'メーカー借入' ? ' selected' : '');
+}
+
+function submitRegister() {
+  const labelId = document.getElementById('f-labelid').value.trim().toUpperCase();
+  const name = document.getElementById('f-name').value.trim();
+  const type = document.getElementById('f-type').value;
+  const maker = document.getElementById('f-maker').value.trim();
+  const notes = document.getElementById('f-notes').value.trim();
+
+  if (!labelId) { showToast('LabelIDを入力してください', 'error'); return; }
+  if (!name) { showToast('機器名を入力してください', 'error'); return; }
+  if (db.devices.find(d => d.labelId === labelId)) {
+    showToast('このLabelIDはすでに使用されています', 'error'); return;
+  }
+
+  const newDevice = {
+    id: db.nextDeviceId++,
+    labelId,
+    name,
+    type,
+    maker,
+    status: '社内',
+    loanTo: null,
+    loanDate: null,
+    returnDueDate: null,
+    returnDate: null,
+    salesRep: null,
+    notes,
+    createdAt: today(),
+  };
+
+  db.devices.push(newDevice);
+  saveDB(db);
+  showToast('機器を登録しました ✓', 'success');
+  viewStack = [];
+  navigate('deviceDetail', { deviceId: newDevice.id });
+}
+
+// ========== SETTINGS ==========
+function renderSettings() {
+  return `
+  <div class="header">
+    <h1>設定</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    <div class="section-title">マスタ管理</div>
+    <div class="card">
+      <div class="settings-item" onclick="navigate('salesReps', {})">
+        <span class="settings-label">営業担当者マスタ</span>
+        <span class="settings-arrow">›</span>
+      </div>
+    </div>
+
+    <div class="section-title">データ管理</div>
+    <div class="card">
+      <div class="settings-item" onclick="exportCSV()">
+        <span class="settings-label">機器一覧をCSV出力</span>
+        <span class="settings-arrow">↓</span>
+      </div>
+      <div class="settings-item" onclick="exportLoansCSV()">
+        <span class="settings-label">貸出履歴をCSV出力</span>
+        <span class="settings-arrow">↓</span>
+      </div>
+    </div>
+
+    <div class="section-title">アプリ情報</div>
+    <div class="card">
+      <div class="info-row"><span class="info-key">バージョン</span><span class="info-val">Phase 1.0</span></div>
+      <div class="info-row"><span class="info-key">登録機器数</span><span class="info-val">${db.devices.length} 台</span></div>
+      <div class="info-row"><span class="info-key">貸出記録数</span><span class="info-val">${db.loans.length} 件</span></div>
+    </div>
+
+    <div style="margin-top:24px;">
+      <button class="btn btn-secondary" onclick="if(confirm('すべてのデータを削除しますか？'))resetData()">
+        ⚠️ データをリセット（テスト用）
+      </button>
+    </div>
+  </div>
+  ${renderNav()}`;
+}
+
+function renderSalesReps() {
+  return `
+  <div class="header">
+    <button class="header-back" onclick="goBack()">← 戻る</button>
+    <h1>営業担当者マスタ</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    <div class="card" style="margin-bottom:16px;">
+      ${db.salesReps.map(r => `
+      <div class="device-item" style="cursor:default;">
+        <div style="flex:1;font-size:15px;font-weight:500;">${r.name}</div>
+        <button onclick="toggleRep(${r.id})" style="border:none;background:${r.active?'var(--in)':'var(--border)'};color:${r.active?'var(--in-text)':'var(--text-sub)'};padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;">${r.active?'有効':'無効'}</button>
+        <button onclick="deleteRep(${r.id})" style="border:none;background:none;color:var(--text-sub);padding:4px 8px;font-size:18px;cursor:pointer;margin-left:4px;">×</button>
+      </div>`).join('')}
+    </div>
+
+    <div class="form-section">
+      <div class="form-label">新しい担当者を追加</div>
+      <div class="scanner-label-input">
+        <input class="form-input" id="new-rep" placeholder="氏名を入力">
+        <button onclick="addRep()">追加</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function toggleRep(id) {
+  const rep = db.salesReps.find(r => r.id === id);
+  if (rep) rep.active = !rep.active;
+  saveDB(db);
+  render();
+}
+
+function deleteRep(id) {
+  if (!confirm('この担当者を削除しますか？')) return;
+  db.salesReps = db.salesReps.filter(r => r.id !== id);
+  saveDB(db);
+  render();
+}
+
+function addRep() {
+  const name = document.getElementById('new-rep').value.trim();
+  if (!name) return;
+  db.salesReps.push({ id: db.nextRepId++, name, active: true });
+  saveDB(db);
+  showToast('追加しました ✓', 'success');
+  render();
+}
+
+function exportCSV() {
+  const rows = [['LabelID','機器名','区分','メーカー','状態','貸出先','貸出日','返却予定日','営業担当','備考']];
+  db.devices.forEach(d => {
+    rows.push([d.labelId, d.name, d.type, d.maker||'', d.status, d.loanTo||'', d.loanDate||'', d.returnDueDate||'', d.salesRep||'', d.notes||'']);
+  });
+  downloadCSV(rows, '機器一覧.csv');
+}
+
+function exportLoansCSV() {
+  const rows = [['ID','LabelID','種別','貸出先','日付','返却予定日','営業担当','備考']];
+  db.loans.forEach(l => {
+    rows.push([l.id, l.labelId, l.type, l.loanTo||'', l.date, l.returnDueDate||'', l.salesRep||'', l.notes||'']);
+  });
+  downloadCSV(rows, '貸出履歴.csv');
+}
+
+function downloadCSV(rows, filename) {
+  const bom = '\uFEFF';
+  const csv = bom + rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function resetData() {
+  localStorage.removeItem(DB_KEY);
+  db = loadDB();
+  showToast('リセットしました');
+  resetTo('home');
+}
+
+// ========== AFTER RENDER ==========
+function afterRender() {
+  if (currentView === 'scanner') {
+    startScanner();
+  }
+}
+
+function startScanner() {
+  const video = document.getElementById('qr-video');
+  if (!video) return;
+  
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    .then(stream => {
+      scannerStream = stream;
+      video.srcObject = stream;
+      video.play();
+      scannerActive = true;
+      requestAnimationFrame(scanFrame);
+    })
+    .catch(err => {
+      console.warn('Camera error:', err);
+      const wrap = document.querySelector('.scanner-wrap');
+      if (wrap) wrap.innerHTML = `<div style="color:white;padding:40px;text-align:center;font-size:14px;">カメラを使用できません。<br>LabelIDを直接入力してください。</div>`;
+    });
+}
+
+function scanFrame() {
+  if (!scannerActive) return;
+  const video = document.getElementById('qr-video');
+  if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) {
+    requestAnimationFrame(scanFrame);
+    return;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const code = jsQR(imageData.data, imageData.width, imageData.height);
+  if (code && code.data) {
+    stopScanner();
+    handleScannedLabel(code.data.trim().toUpperCase());
+    return;
+  }
+  requestAnimationFrame(scanFrame);
+}
+
+// ========== INIT ==========
+render();
+</script>
+</body>
+</html>
