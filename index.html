@@ -588,7 +588,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.3.1';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -698,6 +698,30 @@ function genId(prefix, num) {
 
 function today() {
   return new Date().toISOString().split('T')[0];
+}
+
+function getDeviceInfo() {
+  const ua = navigator.userAgent;
+  let os = 'Unknown OS';
+  let browser = 'Unknown Browser';
+  if (/iPhone/.test(ua)) os = 'iPhone';
+  else if (/iPad/.test(ua)) os = 'iPad';
+  else if (/Android/.test(ua)) os = 'Android';
+  else if (/Windows/.test(ua)) os = 'Windows';
+  else if (/Mac/.test(ua)) os = 'Mac';
+  if (/CriOS|Chrome/.test(ua) && !/Edg/.test(ua)) browser = 'Chrome';
+  else if (/Safari/.test(ua) && !/Chrome/.test(ua)) browser = 'Safari';
+  else if (/Firefox/.test(ua)) browser = 'Firefox';
+  else if (/Edg/.test(ua)) browser = 'Edge';
+  return `${os} / ${browser}`;
+}
+
+function getLastOperator() {
+  return localStorage.getItem('lastOperator') || '';
+}
+
+function saveLastOperator(name) {
+  localStorage.setItem('lastOperator', name);
 }
 
 function fmtDate(d) {
@@ -1114,6 +1138,7 @@ function renderLoanForm() {
   const device = db.devices.find(d => d.id === viewData.deviceId);
   if (!device) return '';
   const activeReps = db.salesReps.filter(r => r.active);
+  const lastOp = getLastOperator();
 
   return `
   <div class="header">
@@ -1127,6 +1152,13 @@ function renderLoanForm() {
       <div style="font-size:17px;font-weight:700;">${device.name}</div>
     </div>
 
+    <div class="form-section">
+      <div class="form-label">操作者 <span class="required">*</span></div>
+      <select class="form-select" id="f-operator">
+        <option value="">選択してください</option>
+        ${activeReps.map(r => `<option value="${r.name}"${r.name === lastOp ? ' selected' : ''}>${r.name}</option>`).join('')}
+      </select>
+    </div>
     <div class="form-section">
       <div class="form-label">貸出先サロン名 <span class="required">*</span></div>
       <input class="form-input" id="f-salon" placeholder="例: ○○サロン 渋谷店" autocomplete="off">
@@ -1160,13 +1192,17 @@ function renderLoanForm() {
 }
 
 async function submitLoan(deviceId) {
+  const operator = document.getElementById('f-operator').value;
   const salon = document.getElementById('f-salon').value.trim();
   const rep = document.getElementById('f-rep').value;
   const duedate = document.getElementById('f-duedate').value;
   const notes = document.getElementById('f-notes').value.trim();
 
+  if (!operator) { showToast('操作者を選択してください', 'error'); return; }
   if (!salon) { showToast('貸出先サロン名を入力してください', 'error'); return; }
   if (!rep) { showToast('営業担当を選択してください', 'error'); return; }
+
+  saveLastOperator(operator);
 
   const device = db.devices.find(d => d.id === deviceId);
   device.status = '貸出中';
@@ -1180,12 +1216,15 @@ async function submitLoan(deviceId) {
     id: db.nextLoanId++,
     deviceId,
     labelId: device.labelId,
+    deviceName: device.name,
     type: '貸出',
     loanTo: salon,
     salesRep: rep,
     date: today(),
     returnDueDate: duedate || null,
     notes,
+    registeredBy: operator,
+    deviceInfo: getDeviceInfo(),
   };
   db.loans.push(newLoan);
 
@@ -1210,6 +1249,8 @@ async function submitLoan(deviceId) {
 function renderReturnForm() {
   const device = db.devices.find(d => d.id === viewData.deviceId);
   if (!device) return '';
+  const activeReps = db.salesReps.filter(r => r.active);
+  const lastOp = getLastOperator();
 
   return `
   <div class="header">
@@ -1225,6 +1266,13 @@ function renderReturnForm() {
     </div>
 
     <div class="form-section">
+      <div class="form-label">操作者 <span class="required">*</span></div>
+      <select class="form-select" id="f-operator">
+        <option value="">選択してください</option>
+        ${activeReps.map(r => `<option value="${r.name}"${r.name === lastOp ? ' selected' : ''}>${r.name}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-section">
       <div class="form-label">返却日</div>
       <input class="form-input" id="f-retdate" type="date" value="${today()}">
     </div>
@@ -1237,8 +1285,13 @@ function renderReturnForm() {
 }
 
 async function submitReturn(deviceId) {
+  const operator = document.getElementById('f-operator').value;
   const retdate = document.getElementById('f-retdate').value || today();
   const notes = document.getElementById('f-notes').value.trim();
+
+  if (!operator) { showToast('操作者を選択してください', 'error'); return; }
+
+  saveLastOperator(operator);
 
   const device = db.devices.find(d => d.id === deviceId);
   const prevLoanTo = device.loanTo;
@@ -1252,10 +1305,13 @@ async function submitReturn(deviceId) {
     id: db.nextLoanId++,
     deviceId,
     labelId: device.labelId,
+    deviceName: device.name,
     type: '返却',
     loanTo: prevLoanTo,
     date: retdate,
     notes,
+    registeredBy: operator,
+    deviceInfo: getDeviceInfo(),
   };
   db.loans.push(returnLoan);
 
