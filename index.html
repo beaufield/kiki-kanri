@@ -559,6 +559,9 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// ========== APP VERSION ==========
+const APP_VERSION = '1.2.0';
+
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
 
@@ -1309,7 +1312,7 @@ async function uploadPendingImage(type) {
   try {
     const res = await apiPost('uploadImage', img);
     console.log('[IMAGE] GASレスポンス:', JSON.stringify(res));
-    const url = (res && res.imageUrl) ? res.imageUrl : null;
+    const url = (res && res.result && res.result.imageUrl) ? res.result.imageUrl : null;
     console.log('[IMAGE] imageUrl:', url);
     return url;
   } catch(e) {
@@ -1407,7 +1410,7 @@ function renderSettings() {
 
     <div class="section-title">アプリ情報</div>
     <div class="card">
-      <div class="info-row"><span class="info-key">バージョン</span><span class="info-val">Phase 1.0</span></div>
+      <div class="info-row"><span class="info-key">バージョン</span><span class="info-val">${APP_VERSION}</span></div>
       <div class="info-row"><span class="info-key">登録数</span><span class="info-val">${db.devices.length} 台</span></div>
       <div class="info-row"><span class="info-key">貸出記録数</span><span class="info-val">${db.loans.length} 件</span></div>
     </div>
