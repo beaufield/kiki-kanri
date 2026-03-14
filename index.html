@@ -588,7 +588,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.3.2';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -1496,6 +1496,8 @@ function closeFormModal() {
 }
 
 function showDisposeModal(deviceId) {
+  const activeReps = db.salesReps.filter(r => r.active);
+  const lastOp = getLastOperator();
   const el = document.createElement('div');
   el.id = 'form-modal-overlay';
   el.className = 'form-modal-overlay';
@@ -1503,7 +1505,14 @@ function showDisposeModal(deviceId) {
     <div class="form-modal">
       <div class="form-modal-title">廃棄登録</div>
       <div class="form-section">
-        <div class="form-label">廃棄日 <span class="required">*</span></div>
+        <div class="form-label">操作者 <span class="required" style="color:var(--danger);">*</span></div>
+        <select class="form-select" id="modal-dispose-operator">
+          <option value="">選択してください</option>
+          ${activeReps.map(r => `<option value="${r.name}"${r.name === lastOp ? ' selected' : ''}>${r.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-section">
+        <div class="form-label">廃棄日 <span class="required" style="color:var(--danger);">*</span></div>
         <input class="form-input" id="modal-dispose-date" type="date" value="${today()}">
       </div>
       <div class="form-section">
@@ -1519,15 +1528,19 @@ function showDisposeModal(deviceId) {
 }
 
 async function submitDispose(deviceId) {
+  const operator = document.getElementById('modal-dispose-operator').value;
   const date = document.getElementById('modal-dispose-date').value;
   const notes = document.getElementById('modal-dispose-notes').value.trim();
+  if (!operator) { showToast('操作者を選択してください', 'error'); return; }
   if (!date) { showToast('廃棄日を入力してください', 'error'); return; }
+  saveLastOperator(operator);
   closeFormModal();
   const device = db.devices.find(d => d.id === deviceId);
   if (!device) return;
   device.status = '廃棄';
   device.disposalDate = date;
   device.disposeNotes = notes || null;
+  device.disposalBy = operator;
   showLoading();
   try {
     await apiPost('saveDevice', device);
@@ -1541,6 +1554,7 @@ async function submitDispose(deviceId) {
     device.status = '社内';
     device.disposalDate = null;
     device.disposeNotes = null;
+    device.disposalBy = null;
   } finally {
     hideLoading();
   }
@@ -1568,6 +1582,8 @@ async function confirmRestore(deviceId) {
 }
 
 function showMakerReturnModal(deviceId) {
+  const activeReps = db.salesReps.filter(r => r.active);
+  const lastOp = getLastOperator();
   const el = document.createElement('div');
   el.id = 'form-modal-overlay';
   el.className = 'form-modal-overlay';
@@ -1575,7 +1591,14 @@ function showMakerReturnModal(deviceId) {
     <div class="form-modal">
       <div class="form-modal-title">メーカー返却登録</div>
       <div class="form-section">
-        <div class="form-label">返却日 <span class="required">*</span></div>
+        <div class="form-label">操作者 <span class="required" style="color:var(--danger);">*</span></div>
+        <select class="form-select" id="modal-maker-operator">
+          <option value="">選択してください</option>
+          ${activeReps.map(r => `<option value="${r.name}"${r.name === lastOp ? ' selected' : ''}>${r.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-section">
+        <div class="form-label">返却日 <span class="required" style="color:var(--danger);">*</span></div>
         <input class="form-input" id="modal-maker-date" type="date" value="${today()}">
       </div>
       <div class="form-section">
@@ -1591,15 +1614,19 @@ function showMakerReturnModal(deviceId) {
 }
 
 async function submitMakerReturn(deviceId) {
+  const operator = document.getElementById('modal-maker-operator').value;
   const date = document.getElementById('modal-maker-date').value;
   const notes = document.getElementById('modal-maker-notes').value.trim();
+  if (!operator) { showToast('操作者を選択してください', 'error'); return; }
   if (!date) { showToast('返却日を入力してください', 'error'); return; }
+  saveLastOperator(operator);
   closeFormModal();
   const device = db.devices.find(d => d.id === deviceId);
   if (!device) return;
   device.status = 'メーカー返却済';
   device.makerReturnDate = date;
   device.makerReturnNotes = notes || null;
+  device.makerReturnBy = operator;
   showLoading();
   try {
     await apiPost('saveDevice', device);
@@ -1613,6 +1640,7 @@ async function submitMakerReturn(deviceId) {
     device.status = '社内';
     device.makerReturnDate = null;
     device.makerReturnNotes = null;
+    device.makerReturnBy = null;
   } finally {
     hideLoading();
   }
@@ -1661,7 +1689,7 @@ function renderMakerReturnedDevices() {
           </div>
           <button class="btn" style="flex-shrink:0;width:120px;background:none;border:1px solid var(--text-sub);color:var(--text-sub);font-size:12px;padding:5px 0;" onclick="confirmRestoreMaker(${d.id})">返却を取り消す</button>
         </div>
-        ${d.makerReturnDate ? `<div style="font-size:12px;color:var(--text-sub);margin-bottom:6px;">返却日: ${fmtDate(d.makerReturnDate)}${d.makerReturnNotes ? ' ・ ' + d.makerReturnNotes : ''}</div>` : ''}
+        ${d.makerReturnDate ? `<div style="font-size:12px;color:var(--text-sub);margin-bottom:6px;">返却日: ${fmtDate(d.makerReturnDate)}${d.makerReturnBy ? ' ・ ' + d.makerReturnBy : ''}${d.makerReturnNotes ? ' ・ ' + d.makerReturnNotes : ''}</div>` : ''}
         ${history.length > 0 ? `
         <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
           <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px;">貸出履歴</div>
@@ -1697,7 +1725,7 @@ function renderDisposedDevices() {
           </div>
           <button class="btn" style="flex-shrink:0;width:120px;background:none;border:1px solid var(--text-sub);color:var(--text-sub);font-size:12px;padding:5px 0;" onclick="confirmRestore(${d.id})">廃棄を取り消す</button>
         </div>
-        ${d.disposalDate ? `<div style="font-size:12px;color:var(--text-sub);margin-bottom:6px;">廃棄日: ${fmtDate(d.disposalDate)}${d.disposeNotes ? ' ・ ' + d.disposeNotes : ''}</div>` : ''}
+        ${d.disposalDate ? `<div style="font-size:12px;color:var(--text-sub);margin-bottom:6px;">廃棄日: ${fmtDate(d.disposalDate)}${d.disposalBy ? ' ・ ' + d.disposalBy : ''}${d.disposeNotes ? ' ・ ' + d.disposeNotes : ''}</div>` : ''}
         ${history.length > 0 ? `
         <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
           <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px;">貸出履歴</div>
