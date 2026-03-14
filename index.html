@@ -1025,6 +1025,7 @@ function renderDeviceDetail() {
         <span class="detail-hero-badge">${device.type}</span>
         ${device.maker ? `<span class="detail-hero-badge">${device.maker}</span>` : ''}
       </div>
+      ${device.imageUrl ? `<img src="${device.imageUrl}" style="width:100%;margin-top:12px;border-radius:10px;object-fit:contain;display:block;">` : ''}
     </div>
 
     ${device.status === '貸出中' ? `
