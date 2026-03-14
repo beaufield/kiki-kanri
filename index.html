@@ -1275,16 +1275,21 @@ function renderRegisterForm() {
 // ========== IMAGE UPLOAD ==========
 function handleImageSelect(type, input) {
   const file = input.files[0];
-  if (!file) return;
+  if (!file) { console.log('[IMAGE] ファイル未選択'); return; }
+  console.log('[IMAGE] ファイル選択:', file.name, file.type, file.size, 'bytes');
   const reader = new FileReader();
   reader.onload = function(e) {
     const dataUrl = e.target.result;
     const base64 = dataUrl.split(',')[1];
     pendingImages[type] = { base64, mimeType: file.type || 'image/jpeg', fileName: file.name || 'upload.jpg' };
+    console.log('[IMAGE] base64変換成功 type=' + type + ' mimeType=' + pendingImages[type].mimeType + ' base64length=' + base64.length);
     const thumb = document.getElementById('img-thumb-' + type);
     const preview = document.getElementById('img-preview-' + type);
     if (thumb) thumb.src = dataUrl;
     if (preview) preview.style.display = '';
+  };
+  reader.onerror = function(err) {
+    console.error('[IMAGE] FileReader エラー:', err);
   };
   reader.readAsDataURL(file);
 }
@@ -1299,9 +1304,18 @@ function clearImage(type) {
 
 async function uploadPendingImage(type) {
   const img = pendingImages[type];
-  if (!img) return null;
-  const res = await apiPost('uploadImage', img);
-  return (res && res.imageUrl) ? res.imageUrl : null;
+  if (!img) { console.log('[IMAGE] アップロードスキップ（画像なし） type=' + type); return null; }
+  console.log('[IMAGE] GASへPOST送信開始 action=uploadImage mimeType=' + img.mimeType + ' fileName=' + img.fileName + ' base64length=' + img.base64.length);
+  try {
+    const res = await apiPost('uploadImage', img);
+    console.log('[IMAGE] GASレスポンス:', JSON.stringify(res));
+    const url = (res && res.imageUrl) ? res.imageUrl : null;
+    console.log('[IMAGE] imageUrl:', url);
+    return url;
+  } catch(e) {
+    console.error('[IMAGE] アップロードエラー:', e.message);
+    throw e;
+  }
 }
 
 function selectType(type) {
