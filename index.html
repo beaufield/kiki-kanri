@@ -527,6 +527,29 @@
   }
   .overdue-banner svg { color: var(--danger); flex-shrink: 0; margin-top: 1px; }
   .overdue-banner-text { font-size: 13px; color: #9b1c1c; font-weight: 500; }
+
+  .loading-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(255,255,255,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    font-size: 15px;
+    color: var(--text-sub);
+    font-weight: 600;
+    gap: 10px;
+    flex-direction: column;
+  }
+  .loading-spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -536,32 +559,71 @@
 
 <script>
 // ========== DATA STORE ==========
-const DB_KEY = 'kiki_kanri_v1';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
 
-function loadDB() {
+let db = {
+  devices: [],
+  loans: [],
+  salesReps: [],
+  nextDeviceId: 1,
+  nextLoanId: 1,
+  nextRepId: 1,
+};
+
+function showLoading() {
+  let el = document.getElementById('loading-overlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'loading-overlay';
+    el.className = 'loading-overlay';
+    el.innerHTML = '<div class="loading-spinner"></div><span>読み込み中...</span>';
+    document.body.appendChild(el);
+  }
+  el.style.display = 'flex';
+}
+
+function hideLoading() {
+  const el = document.getElementById('loading-overlay');
+  if (el) el.style.display = 'none';
+}
+
+async function apiGet() {
+  const res = await fetch(API_URL);
+  if (!res.ok) throw new Error('API error');
+  return res.json();
+}
+
+async function apiPost(action, data) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action, data }),
+  });
+  if (!res.ok) throw new Error('API error');
+  return res.json();
+}
+
+async function loadDB() {
+  showLoading();
   try {
-    const d = localStorage.getItem(DB_KEY);
-    if (d) return JSON.parse(d);
-  } catch(e) {}
-  return {
-    devices: [],
-    loans: [],
-    salesReps: [
-      { id: 1, name: '山田 太郎', active: true },
-      { id: 2, name: '鈴木 花子', active: true },
-      { id: 3, name: '田中 次郎', active: true },
-    ],
-    nextDeviceId: 1,
-    nextLoanId: 1,
-    nextRepId: 4,
-  };
+    const data = await apiGet();
+    db = data;
+    render();
+  } catch(e) {
+    showToast('通信エラーが発生しました', 'error');
+    render();
+  } finally {
+    hideLoading();
+  }
 }
 
-function saveDB(db) {
-  localStorage.setItem(DB_KEY, JSON.stringify(db));
+async function saveDB() {
+  try {
+    await apiPost('saveDB', db);
+  } catch(e) {
+    showToast('通信エラーが発生しました', 'error');
+    throw e;
+  }
 }
-
-let db = loadDB();
 
 // ========== HELPERS ==========
 function genId(prefix, num) {
@@ -998,7 +1060,7 @@ function renderLoanForm() {
   </div>`;
 }
 
-function submitLoan(deviceId) {
+async function submitLoan(deviceId) {
   const salon = document.getElementById('f-salon').value.trim();
   const rep = document.getElementById('f-rep').value;
   const duedate = document.getElementById('f-duedate').value;
@@ -1027,10 +1089,15 @@ function submitLoan(deviceId) {
     notes,
   });
 
-  saveDB(db);
-  showToast('貸出登録しました ✓', 'success');
-  viewStack = [];
-  navigate('deviceDetail', { deviceId });
+  showLoading();
+  try {
+    await saveDB();
+    showToast('貸出登録しました ✓', 'success');
+    viewStack = [];
+    navigate('deviceDetail', { deviceId });
+  } catch(e) {} finally {
+    hideLoading();
+  }
 }
 
 // ========== RETURN FORM ==========
@@ -1063,7 +1130,7 @@ function renderReturnForm() {
   </div>`;
 }
 
-function submitReturn(deviceId) {
+async function submitReturn(deviceId) {
   const retdate = document.getElementById('f-retdate').value || today();
   const notes = document.getElementById('f-notes').value.trim();
 
@@ -1085,10 +1152,15 @@ function submitReturn(deviceId) {
     notes,
   });
 
-  saveDB(db);
-  showToast('返却登録しました ✓', 'success');
-  viewStack = [];
-  navigate('deviceDetail', { deviceId });
+  showLoading();
+  try {
+    await saveDB();
+    showToast('返却登録しました ✓', 'success');
+    viewStack = [];
+    navigate('deviceDetail', { deviceId });
+  } catch(e) {} finally {
+    hideLoading();
+  }
 }
 
 // ========== REGISTER FORM ==========
@@ -1136,7 +1208,7 @@ function selectType(type) {
   document.getElementById('type-maker').className = 'radio-btn' + (type === 'メーカー借入' ? ' selected' : '');
 }
 
-function submitRegister() {
+async function submitRegister() {
   const labelId = document.getElementById('f-labelid').value.trim().toUpperCase();
   const name = document.getElementById('f-name').value.trim();
   const type = document.getElementById('f-type').value;
@@ -1166,10 +1238,15 @@ function submitRegister() {
   };
 
   db.devices.push(newDevice);
-  saveDB(db);
-  showToast('機器を登録しました ✓', 'success');
-  viewStack = [];
-  navigate('deviceDetail', { deviceId: newDevice.id });
+  showLoading();
+  try {
+    await saveDB();
+    showToast('機器を登録しました ✓', 'success');
+    viewStack = [];
+    navigate('deviceDetail', { deviceId: newDevice.id });
+  } catch(e) {} finally {
+    hideLoading();
+  }
 }
 
 // ========== SETTINGS ==========
@@ -1243,27 +1320,42 @@ function renderSalesReps() {
   </div>`;
 }
 
-function toggleRep(id) {
+async function toggleRep(id) {
   const rep = db.salesReps.find(r => r.id === id);
   if (rep) rep.active = !rep.active;
-  saveDB(db);
-  render();
+  showLoading();
+  try {
+    await saveDB();
+    render();
+  } catch(e) {} finally {
+    hideLoading();
+  }
 }
 
-function deleteRep(id) {
+async function deleteRep(id) {
   if (!confirm('この担当者を削除しますか？')) return;
   db.salesReps = db.salesReps.filter(r => r.id !== id);
-  saveDB(db);
-  render();
+  showLoading();
+  try {
+    await saveDB();
+    render();
+  } catch(e) {} finally {
+    hideLoading();
+  }
 }
 
-function addRep() {
+async function addRep() {
   const name = document.getElementById('new-rep').value.trim();
   if (!name) return;
   db.salesReps.push({ id: db.nextRepId++, name, active: true });
-  saveDB(db);
-  showToast('追加しました ✓', 'success');
-  render();
+  showLoading();
+  try {
+    await saveDB();
+    showToast('追加しました ✓', 'success');
+    render();
+  } catch(e) {} finally {
+    hideLoading();
+  }
 }
 
 function exportCSV() {
@@ -1292,11 +1384,18 @@ function downloadCSV(rows, filename) {
   URL.revokeObjectURL(url);
 }
 
-function resetData() {
-  localStorage.removeItem(DB_KEY);
-  db = loadDB();
-  showToast('リセットしました');
-  resetTo('home');
+async function resetData() {
+  showLoading();
+  try {
+    await apiPost('resetDB', {});
+    db = await apiGet();
+    showToast('リセットしました');
+    resetTo('home');
+  } catch(e) {
+    showToast('通信エラーが発生しました', 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 // ========== AFTER RENDER ==========
@@ -1348,7 +1447,7 @@ function scanFrame() {
 }
 
 // ========== INIT ==========
-render();
+loadDB();
 </script>
 </body>
 </html>
