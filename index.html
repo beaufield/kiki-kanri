@@ -701,6 +701,7 @@ function showToast(msg, type = '') {
 let currentView = 'home';
 let viewStack = [];
 let viewData = {};
+let pendingImages = {}; // { reg: {base64,mimeType,fileName} | null, loan: ... }
 
 function navigate(view, data = {}) {
   viewStack.push({ view: currentView, data: viewData });
@@ -1091,6 +1092,15 @@ function renderLoanForm() {
       <div class="form-label">備考</div>
       <input class="form-input" id="f-notes" placeholder="任意">
     </div>
+    <div class="form-section">
+      <div class="form-label">画像 <span style="color:var(--text-sub);font-weight:400;">(任意)</span></div>
+      <input type="file" id="f-img-loan" accept="image/*" style="display:none" onchange="handleImageSelect('loan', this)">
+      <div id="img-preview-loan" style="display:none;margin-bottom:8px;">
+        <img id="img-thumb-loan" style="max-width:100%;max-height:200px;border-radius:8px;object-fit:contain;display:block;">
+        <button class="btn" style="margin-top:6px;background:var(--danger);color:#fff;font-size:13px;padding:6px 14px;" onclick="clearImage('loan')">✕ 削除</button>
+      </div>
+      <button class="btn" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-main);" onclick="document.getElementById('f-img-loan').click()">📷 画像を追加</button>
+    </div>
     <button class="btn btn-primary" onclick="submitLoan(${device.id})">貸出登録する</button>
   </div>`;
 }
@@ -1127,8 +1137,11 @@ async function submitLoan(deviceId) {
 
   showLoading();
   try {
+    const imageUrl = await uploadPendingImage('loan');
+    if (imageUrl) { device.imageUrl = imageUrl; newLoan.imageUrl = imageUrl; }
     await apiPost('saveDevice', device);
     await apiPost('saveLoan', newLoan);
+    pendingImages['loan'] = null;
     showToast('貸出登録しました ✓', 'success');
     currentView = 'home';
     viewData = {};
@@ -1245,8 +1258,49 @@ function renderRegisterForm() {
       <div class="form-label">備考（付属品等）</div>
       <input class="form-input" id="f-notes" placeholder="任意">
     </div>
+    <div class="form-section">
+      <div class="form-label">画像 <span style="color:var(--text-sub);font-weight:400;">(任意)</span></div>
+      <input type="file" id="f-img-reg" accept="image/*" style="display:none" onchange="handleImageSelect('reg', this)">
+      <div id="img-preview-reg" style="display:none;margin-bottom:8px;">
+        <img id="img-thumb-reg" style="max-width:100%;max-height:200px;border-radius:8px;object-fit:contain;display:block;">
+        <button class="btn" style="margin-top:6px;background:var(--danger);color:#fff;font-size:13px;padding:6px 14px;" onclick="clearImage('reg')">✕ 削除</button>
+      </div>
+      <button class="btn" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-main);" onclick="document.getElementById('f-img-reg').click()">📷 画像を追加</button>
+    </div>
     <button class="btn btn-primary" onclick="submitRegister()">商品を登録する</button>
   </div>`;
+}
+
+// ========== IMAGE UPLOAD ==========
+function handleImageSelect(type, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const dataUrl = e.target.result;
+    const base64 = dataUrl.split(',')[1];
+    pendingImages[type] = { base64, mimeType: file.type || 'image/jpeg', fileName: file.name || 'upload.jpg' };
+    const thumb = document.getElementById('img-thumb-' + type);
+    const preview = document.getElementById('img-preview-' + type);
+    if (thumb) thumb.src = dataUrl;
+    if (preview) preview.style.display = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearImage(type) {
+  pendingImages[type] = null;
+  const input = document.getElementById('f-img-' + type);
+  const preview = document.getElementById('img-preview-' + type);
+  if (input) input.value = '';
+  if (preview) preview.style.display = 'none';
+}
+
+async function uploadPendingImage(type) {
+  const img = pendingImages[type];
+  if (!img) return null;
+  const res = await apiPost('uploadImage', img);
+  return (res && res.imageUrl) ? res.imageUrl : null;
 }
 
 function selectType(type) {
@@ -1290,7 +1344,10 @@ async function submitRegister() {
   db.devices.push(newDevice);
   showLoading();
   try {
+    const imageUrl = await uploadPendingImage('reg');
+    if (imageUrl) newDevice.imageUrl = imageUrl;
     await apiPost('saveDevice', newDevice);
+    pendingImages['reg'] = null;
     // スプレッドシートから最新データを再取得
     db = await apiGet();
     const saved = db.devices.find(d => d.labelId === newDevice.labelId);
