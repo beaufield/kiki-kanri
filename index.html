@@ -601,14 +601,6 @@ async function apiPost(action, data) {
   params.append('data', JSON.stringify(data));
 
   const requestBody = params.toString();
-  console.log('[DEBUG] POSTリクエスト送信:', {
-    url: API_URL,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body_action: action,
-    body_data: data,
-    body_raw: requestBody,
-  });
 
   let res;
   try {
@@ -618,39 +610,25 @@ async function apiPost(action, data) {
       body: requestBody,
     });
   } catch (networkErr) {
-    console.error('[DEBUG] ネットワークエラー（fetchが失敗）:', networkErr);
     throw new Error('ネットワークエラー: ' + networkErr.message);
   }
 
-  console.log('[DEBUG] レスポンス受信:', {
-    status: res.status,
-    statusText: res.statusText,
-    ok: res.ok,
-    redirected: res.redirected,
-    url: res.url,
-  });
-
   if (!res.ok) {
     const errText = await res.text().catch(() => '(本文取得不可)');
-    console.error('[DEBUG] HTTPエラー:', res.status, errText);
     throw new Error(`HTTPエラー ${res.status}: ${errText}`);
   }
 
   let json;
   try {
     const rawText = await res.text();
-    console.log('[DEBUG] レスポンス本文（raw）:', rawText);
     json = JSON.parse(rawText);
-    console.log('[DEBUG] レスポンスJSON:', json);
   } catch (parseErr) {
-    console.error('[DEBUG] JSONパースエラー:', parseErr);
     throw new Error('レスポンスのJSONパースに失敗: ' + parseErr.message);
   }
 
   // POSTがGETにリダイレクトされた場合の検出:
   // doGetのレスポンス（devicesキーがある）が返ってきた場合はエラー扱い
   if (json && 'devices' in json && !('status' in json)) {
-    console.error('[DEBUG] POSTがGETにリダイレクトされました。GAS側のdoPost設定を確認してください。res.redirected =', res.redirected, ', 最終URL =', res.url);
     throw new Error('POSTがGETにリダイレクトされました（GAS設定エラー）');
   }
 
@@ -675,7 +653,6 @@ async function saveDB() {
   try {
     await apiPost('saveDB', db);
   } catch(e) {
-    console.error('[DEBUG] saveDB エラー:', e);
     showToast('保存失敗: ' + e.message, 'error');
     throw e;
   }
@@ -956,7 +933,7 @@ function renderScanner() {
 
   return `
   <div class="header">
-    ${viewStack.length > 0 ? `<button class="header-back" onclick="goBack()">← 戻る</button>` : '<div></div>'}
+    ${viewStack.length > 0 ? `<div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>` : '<div></div>'}
     <h1>${title}</h1>
     <div></div>
   </div>
@@ -1034,7 +1011,7 @@ function renderDeviceDetail() {
 
   return `
   <div class="header">
-    <button class="header-back" onclick="goBack()">← 戻る</button>
+    <div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>
     <h1>機器詳細</h1>
     <div></div>
   </div>
@@ -1085,7 +1062,7 @@ function renderLoanForm() {
 
   return `
   <div class="header">
-    <button class="header-back" onclick="goBack()">← 戻る</button>
+    <div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>
     <h1>貸出登録</h1>
     <div></div>
   </div>
@@ -1153,6 +1130,8 @@ async function submitLoan(deviceId) {
     await apiPost('saveDevice', device);
     await apiPost('saveLoan', newLoan);
     showToast('貸出登録しました ✓', 'success');
+    currentView = 'home';
+    viewData = {};
     viewStack = [];
     navigate('deviceDetail', { deviceId });
   } catch(e) {} finally {
@@ -1167,7 +1146,7 @@ function renderReturnForm() {
 
   return `
   <div class="header">
-    <button class="header-back" onclick="goBack()">← 戻る</button>
+    <div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>
     <h1>返却登録</h1>
     <div></div>
   </div>
@@ -1218,6 +1197,8 @@ async function submitReturn(deviceId) {
     await apiPost('saveDevice', device);
     await apiPost('saveLoan', returnLoan);
     showToast('返却登録しました ✓', 'success');
+    currentView = 'home';
+    viewData = {};
     viewStack = [];
     navigate('deviceDetail', { deviceId });
   } catch(e) {} finally {
@@ -1231,7 +1212,7 @@ function renderRegisterForm() {
 
   return `
   <div class="header">
-    <button class="header-back" onclick="goBack()">← 戻る</button>
+    <div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>
     <h1>新規機器登録</h1>
     <div></div>
   </div>
@@ -1277,8 +1258,6 @@ async function submitRegister() {
   const maker = document.getElementById('f-maker').value.trim();
   const notes = document.getElementById('f-notes').value.trim();
 
-  console.log('[DEBUG] submitRegister 開始:', { labelId, name, type, maker, notes });
-
   if (!labelId) { showToast('LabelIDを入力してください', 'error'); return; }
   if (!name) { showToast('機器名を入力してください', 'error'); return; }
   if (db.devices.find(d => d.labelId === labelId)) {
@@ -1301,22 +1280,19 @@ async function submitRegister() {
     createdAt: today(),
   };
 
-  console.log('[DEBUG] 登録する機器データ:', newDevice);
-  console.log('[DEBUG] saveDB呼び出し前のdb.devices数:', db.devices.length);
-
   db.devices.push(newDevice);
   showLoading();
   try {
     await apiPost('saveDevice', newDevice);
-    console.log('[DEBUG] saveDevice 成功');
     // スプレッドシートから最新データを再取得
     db = await apiGet();
     const saved = db.devices.find(d => d.labelId === newDevice.labelId);
     showToast('機器を登録しました ✓', 'success');
+    currentView = 'home';
+    viewData = {};
     viewStack = [];
     navigate('deviceDetail', { deviceId: saved ? saved.id : newDevice.id });
   } catch(e) {
-    console.error('[DEBUG] submitRegister catch:', e);
   } finally {
     hideLoading();
   }
@@ -1369,7 +1345,7 @@ function renderSettings() {
 function renderSalesReps() {
   return `
   <div class="header">
-    <button class="header-back" onclick="goBack()">← 戻る</button>
+    <div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>
     <h1>営業担当者マスタ</h1>
     <div></div>
   </div>
