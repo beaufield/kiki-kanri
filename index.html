@@ -1237,6 +1237,10 @@ function renderRegisterForm() {
       <div class="form-label">メーカー名</div>
       <input class="form-input" id="f-maker" placeholder="例: パナソニック">
     </div>
+    <div class="form-section" id="maker-due-section" style="display:none;">
+      <div class="form-label">メーカー返却期限 <span style="color:var(--text-sub);font-weight:400;">(未定の場合は空欄)</span></div>
+      <input class="form-input" id="f-maker-due" type="date">
+    </div>
     <div class="form-section">
       <div class="form-label">備考（付属品等）</div>
       <input class="form-input" id="f-notes" placeholder="任意">
@@ -1249,6 +1253,7 @@ function selectType(type) {
   document.getElementById('f-type').value = type;
   document.getElementById('type-own').className = 'radio-btn' + (type === '自社資産' ? ' selected' : '');
   document.getElementById('type-maker').className = 'radio-btn' + (type === 'メーカー借入' ? ' selected' : '');
+  document.getElementById('maker-due-section').style.display = type === 'メーカー借入' ? '' : 'none';
 }
 
 async function submitRegister() {
@@ -1256,6 +1261,7 @@ async function submitRegister() {
   const name = document.getElementById('f-name').value.trim();
   const type = document.getElementById('f-type').value;
   const maker = document.getElementById('f-maker').value.trim();
+  const makerDue = document.getElementById('f-maker-due').value;
   const notes = document.getElementById('f-notes').value.trim();
 
   if (!labelId) { showToast('LabelIDを入力してください', 'error'); return; }
@@ -1277,6 +1283,7 @@ async function submitRegister() {
     returnDate: null,
     salesRep: null,
     notes,
+    makerReturnDueDate: makerDue || null,
     createdAt: today(),
   };
 
