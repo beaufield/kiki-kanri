@@ -441,7 +441,8 @@
     box-shadow: var(--shadow-lg);
     opacity: 0;
     transition: opacity 0.3s;
-    white-space: nowrap;
+    white-space: pre-wrap;
+    word-break: break-all;
     pointer-events: none;
     max-width: calc(100vw - 32px);
   }
@@ -599,20 +600,58 @@ async function apiPost(action, data) {
   params.append('action', action);
   params.append('data', JSON.stringify(data));
 
-  const res = await fetch(API_URL, {
+  const requestBody = params.toString();
+  console.log('[DEBUG] POSTリクエスト送信:', {
+    url: API_URL,
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
+    body_action: action,
+    body_data: data,
+    body_raw: requestBody,
   });
-  if (!res.ok) throw new Error('API error');
 
-  const json = await res.json();
+  let res;
+  try {
+    res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: requestBody,
+    });
+  } catch (networkErr) {
+    console.error('[DEBUG] ネットワークエラー（fetchが失敗）:', networkErr);
+    throw new Error('ネットワークエラー: ' + networkErr.message);
+  }
+
+  console.log('[DEBUG] レスポンス受信:', {
+    status: res.status,
+    statusText: res.statusText,
+    ok: res.ok,
+    redirected: res.redirected,
+    url: res.url,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '(本文取得不可)');
+    console.error('[DEBUG] HTTPエラー:', res.status, errText);
+    throw new Error(`HTTPエラー ${res.status}: ${errText}`);
+  }
+
+  let json;
+  try {
+    const rawText = await res.text();
+    console.log('[DEBUG] レスポンス本文（raw）:', rawText);
+    json = JSON.parse(rawText);
+    console.log('[DEBUG] レスポンスJSON:', json);
+  } catch (parseErr) {
+    console.error('[DEBUG] JSONパースエラー:', parseErr);
+    throw new Error('レスポンスのJSONパースに失敗: ' + parseErr.message);
+  }
 
   // POSTがGETにリダイレクトされた場合の検出:
   // doGetのレスポンス（devicesキーがある）が返ってきた場合はエラー扱い
   if (json && 'devices' in json && !('status' in json)) {
-    console.error('POSTリクエストがGETにリダイレクトされました。GASスクリプトのdoPost設定を確認してください。');
-    throw new Error('POST redirect');
+    console.error('[DEBUG] POSTがGETにリダイレクトされました。GAS側のdoPost設定を確認してください。res.redirected =', res.redirected, ', 最終URL =', res.url);
+    throw new Error('POSTがGETにリダイレクトされました（GAS設定エラー）');
   }
 
   return json;
@@ -636,11 +675,8 @@ async function saveDB() {
   try {
     await apiPost('saveDB', db);
   } catch(e) {
-    if (e.message === 'POST redirect') {
-      showToast('保存に失敗しました（GAS設定を確認してください）', 'error');
-    } else {
-      showToast('通信エラーが発生しました', 'error');
-    }
+    console.error('[DEBUG] saveDB エラー:', e);
+    showToast('保存失敗: ' + e.message, 'error');
     throw e;
   }
 }
@@ -679,7 +715,9 @@ function showToast(msg, type = '') {
   t.textContent = msg;
   t.className = 'toast show ' + type;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.className = 'toast'; }, 2800);
+  // エラー時は長めに表示（8秒）、それ以外は3秒
+  const duration = type === 'error' ? 8000 : 2800;
+  toastTimer = setTimeout(() => { t.className = 'toast'; }, duration);
 }
 
 // ========== ROUTER ==========
