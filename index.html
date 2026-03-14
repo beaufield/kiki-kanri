@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>貸出管理</title>
+<title>ビューフィールド貸出管理</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <style>
   :root {
@@ -669,7 +669,7 @@ function today() {
 
 function fmtDate(d) {
   if (!d) return '—';
-  return d.replace(/-/g, '/');
+  return d.split('T')[0].replace(/-/g, '/');
 }
 
 function isOverdue(device) {
@@ -783,7 +783,7 @@ function renderHome() {
 
   return `
   <div class="header">
-    <h1>貸出管理</h1>
+    <h1>ビューフィールド貸出管理</h1>
     <span style="font-size:12px;opacity:0.8;">${today().replace(/-/g,'/')}</span>
   </div>
   <div class="content">
