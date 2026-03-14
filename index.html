@@ -1135,7 +1135,7 @@ async function submitLoan(deviceId) {
   device.returnDueDate = duedate || null;
   device.notes = notes;
 
-  db.loans.push({
+  const newLoan = {
     id: db.nextLoanId++,
     deviceId,
     labelId: device.labelId,
@@ -1145,11 +1145,12 @@ async function submitLoan(deviceId) {
     date: today(),
     returnDueDate: duedate || null,
     notes,
-  });
+  };
+  db.loans.push(newLoan);
 
   showLoading();
   try {
-    await saveDB();
+    await apiPost('saveLoan', { device, loan: newLoan });
     showToast('貸出登録しました ✓', 'success');
     viewStack = [];
     navigate('deviceDetail', { deviceId });
@@ -1200,7 +1201,7 @@ async function submitReturn(deviceId) {
   device.returnDueDate = null;
   device.salesRep = null;
 
-  db.loans.push({
+  const returnLoan = {
     id: db.nextLoanId++,
     deviceId,
     labelId: device.labelId,
@@ -1208,11 +1209,13 @@ async function submitReturn(deviceId) {
     loanTo: prevLoanTo,
     date: retdate,
     notes,
-  });
+  };
+  db.loans.push(returnLoan);
 
   showLoading();
   try {
-    await saveDB();
+    await apiPost('saveDevice', device);
+    await apiPost('saveLoan', returnLoan);
     showToast('返却登録しました ✓', 'success');
     viewStack = [];
     navigate('deviceDetail', { deviceId });
@@ -1303,8 +1306,8 @@ async function submitRegister() {
   db.devices.push(newDevice);
   showLoading();
   try {
-    await saveDB();
-    console.log('[DEBUG] saveDB 成功');
+    await apiPost('saveDevice', newDevice);
+    console.log('[DEBUG] saveDevice 成功');
     showToast('機器を登録しました ✓', 'success');
     viewStack = [];
     navigate('deviceDetail', { deviceId: newDevice.id });
@@ -1391,7 +1394,7 @@ async function toggleRep(id) {
   if (rep) rep.active = !rep.active;
   showLoading();
   try {
-    await saveDB();
+    await apiPost('saveSalesRep', rep);
     render();
   } catch(e) {} finally {
     hideLoading();
@@ -1403,7 +1406,7 @@ async function deleteRep(id) {
   db.salesReps = db.salesReps.filter(r => r.id !== id);
   showLoading();
   try {
-    await saveDB();
+    await apiPost('deleteSalesRep', { id });
     render();
   } catch(e) {} finally {
     hideLoading();
@@ -1413,10 +1416,11 @@ async function deleteRep(id) {
 async function addRep() {
   const name = document.getElementById('new-rep').value.trim();
   if (!name) return;
-  db.salesReps.push({ id: db.nextRepId++, name, active: true });
+  const newRep = { id: db.nextRepId++, name, active: true };
+  db.salesReps.push(newRep);
   showLoading();
   try {
-    await saveDB();
+    await apiPost('saveSalesRep', newRep);
     showToast('追加しました ✓', 'success');
     render();
   } catch(e) {} finally {
