@@ -560,7 +560,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -682,9 +682,10 @@ function isOverdue(device) {
 }
 
 function getStats() {
-  const total = db.devices.length;
-  const loan = db.devices.filter(d => d.status === '貸出中').length;
-  const overdue = db.devices.filter(d => isOverdue(d)).length;
+  const active = db.devices.filter(d => d.status !== '廃棄');
+  const total = active.length;
+  const loan = active.filter(d => d.status === '貸出中').length;
+  const overdue = active.filter(d => isOverdue(d)).length;
   return { total, loan, overdue };
 }
 
@@ -744,6 +745,7 @@ function render() {
     registerForm: renderRegisterForm,
     settings: renderSettings,
     salesReps: renderSalesReps,
+    disposedDevices: renderDisposedDevices,
   };
 
   const fn = views[currentView] || renderHome;
@@ -782,8 +784,8 @@ function renderNav() {
 // ========== HOME ==========
 function renderHome() {
   const stats = getStats();
-  const loanDevices = db.devices.filter(d => d.status === '貸出中').slice(0, 5);
-  const overdueDevices = db.devices.filter(d => isOverdue(d));
+  const loanDevices = db.devices.filter(d => d.status === '貸出中' && d.status !== '廃棄').slice(0, 5);
+  const overdueDevices = db.devices.filter(d => isOverdue(d) && d.status !== '廃棄');
 
   return `
   <div class="header">
@@ -862,7 +864,7 @@ function renderDevices() {
   const filter = viewData.filter || 'all';
   const search = viewData.search || '';
 
-  let devices = [...db.devices];
+  let devices = db.devices.filter(d => d.status !== '廃棄');
   if (filter === 'loan') devices = devices.filter(d => d.status === '貸出中');
   if (filter === 'in') devices = devices.filter(d => d.status === '社内');
   if (filter === 'overdue') devices = devices.filter(d => isOverdue(d));
@@ -1042,7 +1044,8 @@ function renderDeviceDetail() {
     </div>
     <button class="btn btn-primary" style="margin-bottom:8px;" onclick="navigate('returnForm', {deviceId:${device.id}})">返却登録する</button>
     ` : `
-    <button class="btn btn-outline" style="margin-bottom:12px;" onclick="navigate('loanForm', {deviceId:${device.id}})">この商品を貸出登録する</button>
+    <button class="btn btn-outline" style="margin-bottom:8px;" onclick="navigate('loanForm', {deviceId:${device.id}})">この商品を貸出登録する</button>
+    <button class="btn" style="margin-bottom:12px;background:none;border:1px solid var(--danger);color:var(--danger);width:100%;" onclick="confirmDispose(${device.id})">この商品を廃棄登録する</button>
     `}
 
     ${history.length > 0 ? `
@@ -1380,6 +1383,81 @@ async function submitRegister() {
   }
 }
 
+// ========== DISPOSE ==========
+async function confirmDispose(deviceId) {
+  if (!confirm('この商品を廃棄登録します。よろしいですか？')) return;
+  const device = db.devices.find(d => d.id === deviceId);
+  if (!device) return;
+  device.status = '廃棄';
+  showLoading();
+  try {
+    await apiPost('saveDevice', device);
+    showToast('廃棄登録しました', 'success');
+    currentView = 'home';
+    viewData = {};
+    viewStack = [];
+    navigate('home', {});
+  } catch(e) {
+    showToast('エラーが発生しました', 'error');
+    device.status = '社内';
+  } finally {
+    hideLoading();
+  }
+}
+
+async function confirmRestore(deviceId) {
+  if (!confirm('廃棄を取り消して「社内」に戻しますか？')) return;
+  const device = db.devices.find(d => d.id === deviceId);
+  if (!device) return;
+  device.status = '社内';
+  showLoading();
+  try {
+    await apiPost('saveDevice', device);
+    showToast('廃棄を取り消しました', 'success');
+    render();
+  } catch(e) {
+    showToast('エラーが発生しました', 'error');
+    device.status = '廃棄';
+  } finally {
+    hideLoading();
+  }
+}
+
+function renderDisposedDevices() {
+  const disposed = db.devices.filter(d => d.status === '廃棄');
+  return `
+  <div class="header">
+    <div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>
+    <h1>廃棄済み商品</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    ${disposed.length === 0 ? '<p style="color:var(--text-sub);text-align:center;margin-top:32px;">廃棄済み商品はありません</p>' : disposed.map(d => {
+      const history = db.loans.filter(l => l.deviceId === d.id).sort((a,b) => b.date.localeCompare(a.date));
+      return `
+      <div class="card" style="margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+          <div>
+            <div style="font-size:12px;color:var(--text-sub);">${d.labelId}</div>
+            <div style="font-size:16px;font-weight:700;">${d.name}</div>
+            <div style="font-size:12px;color:var(--text-sub);margin-top:2px;">${d.type}${d.maker ? ' ・ ' + d.maker : ''}</div>
+          </div>
+          <button class="btn" style="background:none;border:1px solid var(--text-sub);color:var(--text-sub);font-size:12px;padding:5px 10px;white-space:nowrap;" onclick="confirmRestore(${d.id})">廃棄を取り消す</button>
+        </div>
+        ${history.length > 0 ? `
+        <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+          <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px;">貸出履歴</div>
+          ${history.map(l => `
+          <div class="history-item">
+            <span class="history-type ${l.type==='貸出'?'loan':'ret'}">${l.type}</span>
+            <div class="history-detail">${l.type==='貸出' ? fmtDate(l.date) + ' ・ ' + (l.loanTo||'—') + ' ・ ' + (l.salesRep||'—') : fmtDate(l.date) + ' 返却'}</div>
+          </div>`).join('')}
+        </div>` : ''}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
 // ========== SETTINGS ==========
 function renderSettings() {
   return `
@@ -1392,6 +1470,10 @@ function renderSettings() {
     <div class="card">
       <div class="settings-item" onclick="navigate('salesReps', {})">
         <span class="settings-label">営業担当者マスタ</span>
+        <span class="settings-arrow">›</span>
+      </div>
+      <div class="settings-item" onclick="navigate('disposedDevices', {})">
+        <span class="settings-label">廃棄済み商品</span>
         <span class="settings-arrow">›</span>
       </div>
     </div>
