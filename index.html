@@ -1150,7 +1150,8 @@ async function submitLoan(deviceId) {
 
   showLoading();
   try {
-    await apiPost('saveLoan', { device, loan: newLoan });
+    await apiPost('saveDevice', device);
+    await apiPost('saveLoan', newLoan);
     showToast('貸出登録しました ✓', 'success');
     viewStack = [];
     navigate('deviceDetail', { deviceId });
