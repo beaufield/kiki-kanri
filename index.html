@@ -588,7 +588,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.2.5';
+const APP_VERSION = '1.3.0';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -597,9 +597,11 @@ let db = {
   devices: [],
   loans: [],
   salesReps: [],
+  makers: [],
   nextDeviceId: 1,
   nextLoanId: 1,
   nextRepId: 1,
+  nextMakerId: 1,
 };
 
 function showLoading() {
@@ -773,6 +775,7 @@ function render() {
     registerForm: renderRegisterForm,
     settings: renderSettings,
     salesReps: renderSalesReps,
+    makers: renderMakers,
     disposedDevices: renderDisposedDevices,
     makerReturnedDevices: renderMakerReturnedDevices,
   };
@@ -891,18 +894,26 @@ function renderHome() {
 // ========== DEVICES ==========
 function renderDevices() {
   const filter = viewData.filter || 'all';
+  const makerFilter = viewData.makerFilter || '';
   const search = viewData.search || '';
+  const activeDevices = db.devices.filter(d => d.status !== '廃棄' && d.status !== 'メーカー返却済');
 
-  let devices = db.devices.filter(d => d.status !== '廃棄' && d.status !== 'メーカー返却済');
+  let devices = [...activeDevices];
   if (filter === 'loan') devices = devices.filter(d => d.status === '貸出中');
   if (filter === 'in') devices = devices.filter(d => d.status === '社内');
   if (filter === 'overdue') devices = devices.filter(d => isOverdue(d));
   if (filter === 'nodate') devices = devices.filter(d => d.status === '貸出中' && !d.returnDueDate);
   if (filter === 'maker') devices = devices.filter(d => d.type === 'メーカー借入' && d.status === '貸出中');
+  if (filter === 'byMaker') {
+    if (makerFilter) devices = devices.filter(d => d.maker === makerFilter);
+  }
   if (search) {
     const q = search.toLowerCase();
     devices = devices.filter(d => d.name.toLowerCase().includes(q) || d.labelId.toLowerCase().includes(q) || (d.loanTo||'').toLowerCase().includes(q));
   }
+
+  // メーカー別サブフィルター用: 有効なメーカー一覧（商品に紐づくもの）
+  const makerNames = [...new Set(activeDevices.map(d => d.maker).filter(Boolean))].sort();
 
   return `
   <div class="header">
@@ -918,13 +929,19 @@ function renderDevices() {
       <input type="search" placeholder="商品名・LabelID・貸出先" value="${search}" oninput="viewData.search=this.value;render()">
     </div>
     <div class="filter-tabs">
-      <button class="filter-tab ${filter==='all'?'active':''}" onclick="viewData.filter='all';render()">すべて(${db.devices.length})</button>
-      <button class="filter-tab ${filter==='loan'?'active':''}" onclick="viewData.filter='loan';render()">貸出中</button>
-      <button class="filter-tab ${filter==='overdue'?'active':''}" onclick="viewData.filter='overdue';render()">期限超過</button>
-      <button class="filter-tab ${filter==='nodate'?'active':''}" onclick="viewData.filter='nodate';render()">返却日未定</button>
-      <button class="filter-tab ${filter==='maker'?'active':''}" onclick="viewData.filter='maker';render()">メーカー借入</button>
-      <button class="filter-tab ${filter==='in'?'active':''}" onclick="viewData.filter='in';render()">社内</button>
+      <button class="filter-tab ${filter==='all'?'active':''}" onclick="viewData.filter='all';viewData.makerFilter='';render()">すべて(${activeDevices.length})</button>
+      <button class="filter-tab ${filter==='loan'?'active':''}" onclick="viewData.filter='loan';viewData.makerFilter='';render()">貸出中</button>
+      <button class="filter-tab ${filter==='overdue'?'active':''}" onclick="viewData.filter='overdue';viewData.makerFilter='';render()">期限超過</button>
+      <button class="filter-tab ${filter==='nodate'?'active':''}" onclick="viewData.filter='nodate';viewData.makerFilter='';render()">返却日未定</button>
+      <button class="filter-tab ${filter==='maker'?'active':''}" onclick="viewData.filter='maker';viewData.makerFilter='';render()">メーカー借入</button>
+      <button class="filter-tab ${filter==='in'?'active':''}" onclick="viewData.filter='in';viewData.makerFilter='';render()">社内</button>
+      <button class="filter-tab ${filter==='byMaker'?'active':''}" onclick="viewData.filter='byMaker';viewData.makerFilter='';render()">メーカー別</button>
     </div>
+    ${filter === 'byMaker' ? `
+    <div class="filter-tabs" style="margin-top:4px;">
+      <button class="filter-tab ${makerFilter===''?'active':''}" onclick="viewData.makerFilter='';render()">すべて</button>
+      ${makerNames.map(m => `<button class="filter-tab ${makerFilter===m?'active':''}" onclick="viewData.makerFilter='${m.replace(/'/g,"\\'")}';render()">${m}</button>`).join('')}
+    </div>` : ''}
     ${devices.length > 0 ? `
     <div class="card">
       ${devices.map(d => `
@@ -1285,7 +1302,10 @@ function renderRegisterForm() {
     </div>
     <div class="form-section">
       <div class="form-label">メーカー名</div>
-      <input class="form-input" id="f-maker" placeholder="例: パナソニック">
+      <select class="form-select" id="f-maker">
+        <option value="">選択してください</option>
+        ${(db.makers||[]).filter(m => m.active).map(m => `<option value="${m.name}">${m.name}</option>`).join('')}
+      </select>
     </div>
     <div class="form-section" id="maker-due-section" style="display:none;">
       <div class="form-label">メーカー返却期限 <span style="color:var(--text-sub);font-weight:400;">(未定の場合は空欄)</span></div>
@@ -1650,6 +1670,10 @@ function renderSettings() {
         <span class="settings-label">営業担当者マスタ</span>
         <span class="settings-arrow">›</span>
       </div>
+      <div class="settings-item" onclick="navigate('makers', {})">
+        <span class="settings-label">メーカーマスタ</span>
+        <span class="settings-arrow">›</span>
+      </div>
       <div class="settings-item" onclick="navigate('disposedDevices', {})">
         <span class="settings-label">廃棄済み商品</span>
         <span class="settings-arrow">›</span>
@@ -1742,6 +1766,73 @@ async function addRep() {
   showLoading();
   try {
     await apiPost('saveSalesRep', newRep);
+    showToast('追加しました ✓', 'success');
+    render();
+  } catch(e) {} finally {
+    hideLoading();
+  }
+}
+
+// ========== MAKERS MASTER ==========
+function renderMakers() {
+  return `
+  <div class="header">
+    <div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>
+    <h1>メーカーマスタ</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    <div class="card" style="margin-bottom:16px;">
+      ${(db.makers||[]).map(m => `
+      <div class="device-item" style="cursor:default;">
+        <div style="flex:1;font-size:15px;font-weight:500;">${m.name}</div>
+        <button onclick="toggleMaker(${m.id})" style="border:none;background:${m.active?'var(--in)':'var(--border)'};color:${m.active?'var(--in-text)':'var(--text-sub)'};padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;">${m.active?'有効':'無効'}</button>
+        <button onclick="deleteMaker(${m.id})" style="border:none;background:none;color:var(--text-sub);padding:4px 8px;font-size:18px;cursor:pointer;margin-left:4px;">×</button>
+      </div>`).join('')}
+    </div>
+    <div class="form-section">
+      <div class="form-label">新しいメーカーを追加</div>
+      <div class="scanner-label-input">
+        <input class="form-input" id="new-maker" placeholder="メーカー名を入力">
+        <button onclick="addMaker()">追加</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function toggleMaker(id) {
+  const m = (db.makers||[]).find(m => m.id === id);
+  if (m) m.active = !m.active;
+  showLoading();
+  try {
+    await apiPost('saveMaker', m);
+    render();
+  } catch(e) {} finally {
+    hideLoading();
+  }
+}
+
+async function deleteMaker(id) {
+  if (!confirm('このメーカーを削除しますか？')) return;
+  db.makers = (db.makers||[]).filter(m => m.id !== id);
+  showLoading();
+  try {
+    await apiPost('deleteMaker', { id });
+    render();
+  } catch(e) {} finally {
+    hideLoading();
+  }
+}
+
+async function addMaker() {
+  const name = document.getElementById('new-maker').value.trim();
+  if (!name) return;
+  if (!db.makers) db.makers = [];
+  const newMaker = { id: db.nextMakerId++, name, active: true };
+  db.makers.push(newMaker);
+  showLoading();
+  try {
+    await apiPost('saveMaker', newMaker);
     showToast('追加しました ✓', 'success');
     render();
   } catch(e) {} finally {
