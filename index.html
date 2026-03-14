@@ -560,7 +560,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.2.2';
+const APP_VERSION = '1.2.3';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -682,7 +682,7 @@ function isOverdue(device) {
 }
 
 function getStats() {
-  const active = db.devices.filter(d => d.status !== '廃棄');
+  const active = db.devices.filter(d => d.status !== '廃棄' && d.status !== 'メーカー返却済');
   const total = active.length;
   const loan = active.filter(d => d.status === '貸出中').length;
   const overdue = active.filter(d => isOverdue(d)).length;
@@ -746,6 +746,7 @@ function render() {
     settings: renderSettings,
     salesReps: renderSalesReps,
     disposedDevices: renderDisposedDevices,
+    makerReturnedDevices: renderMakerReturnedDevices,
   };
 
   const fn = views[currentView] || renderHome;
@@ -784,8 +785,8 @@ function renderNav() {
 // ========== HOME ==========
 function renderHome() {
   const stats = getStats();
-  const loanDevices = db.devices.filter(d => d.status === '貸出中' && d.status !== '廃棄').slice(0, 5);
-  const overdueDevices = db.devices.filter(d => isOverdue(d) && d.status !== '廃棄');
+  const loanDevices = db.devices.filter(d => d.status === '貸出中').slice(0, 5);
+  const overdueDevices = db.devices.filter(d => isOverdue(d));
 
   return `
   <div class="header">
@@ -864,7 +865,7 @@ function renderDevices() {
   const filter = viewData.filter || 'all';
   const search = viewData.search || '';
 
-  let devices = db.devices.filter(d => d.status !== '廃棄');
+  let devices = db.devices.filter(d => d.status !== '廃棄' && d.status !== 'メーカー返却済');
   if (filter === 'loan') devices = devices.filter(d => d.status === '貸出中');
   if (filter === 'in') devices = devices.filter(d => d.status === '社内');
   if (filter === 'overdue') devices = devices.filter(d => isOverdue(d));
@@ -1045,6 +1046,7 @@ function renderDeviceDetail() {
     <button class="btn btn-primary" style="margin-bottom:8px;" onclick="navigate('returnForm', {deviceId:${device.id}})">返却登録する</button>
     ` : `
     <button class="btn btn-outline" style="margin-bottom:8px;" onclick="navigate('loanForm', {deviceId:${device.id}})">この商品を貸出登録する</button>
+    ${device.type === 'メーカー借入' ? `<button class="btn" style="margin-bottom:8px;background:none;border:1px solid var(--primary);color:var(--primary);width:100%;" onclick="confirmMakerReturn(${device.id})">メーカーへ返却する</button>` : ''}
     <button class="btn" style="margin-bottom:12px;background:none;border:1px solid var(--danger);color:var(--danger);width:100%;" onclick="confirmDispose(${device.id})">この商品を廃棄登録する</button>
     `}
 
@@ -1423,6 +1425,80 @@ async function confirmRestore(deviceId) {
   }
 }
 
+async function confirmMakerReturn(deviceId) {
+  if (!confirm('この商品をメーカーへ返却済みとして登録します。よろしいですか？')) return;
+  const device = db.devices.find(d => d.id === deviceId);
+  if (!device) return;
+  device.status = 'メーカー返却済';
+  showLoading();
+  try {
+    await apiPost('saveDevice', device);
+    showToast('メーカー返却済みとして登録しました', 'success');
+    currentView = 'home';
+    viewData = {};
+    viewStack = [];
+    navigate('home', {});
+  } catch(e) {
+    showToast('エラーが発生しました', 'error');
+    device.status = '社内';
+  } finally {
+    hideLoading();
+  }
+}
+
+async function confirmRestoreMaker(deviceId) {
+  if (!confirm('メーカー返却を取り消して「社内」に戻しますか？')) return;
+  const device = db.devices.find(d => d.id === deviceId);
+  if (!device) return;
+  device.status = '社内';
+  showLoading();
+  try {
+    await apiPost('saveDevice', device);
+    showToast('メーカー返却を取り消しました', 'success');
+    render();
+  } catch(e) {
+    showToast('エラーが発生しました', 'error');
+    device.status = 'メーカー返却済';
+  } finally {
+    hideLoading();
+  }
+}
+
+function renderMakerReturnedDevices() {
+  const list = db.devices.filter(d => d.status === 'メーカー返却済');
+  return `
+  <div class="header">
+    <div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>
+    <h1>メーカー返却済み商品</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    ${list.length === 0 ? '<p style="color:var(--text-sub);text-align:center;margin-top:32px;">メーカー返却済み商品はありません</p>' : list.map(d => {
+      const history = db.loans.filter(l => l.deviceId === d.id).sort((a,b) => b.date.localeCompare(a.date));
+      return `
+      <div class="card" style="margin-bottom:12px;">
+        <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;color:var(--text-sub);">${d.labelId}</div>
+            <div style="font-size:16px;font-weight:700;">${d.name}</div>
+            <div style="font-size:12px;color:var(--text-sub);margin-top:2px;">${d.type}${d.maker ? ' ・ ' + d.maker : ''}</div>
+          </div>
+          <button class="btn" style="flex-shrink:0;width:120px;background:none;border:1px solid var(--text-sub);color:var(--text-sub);font-size:12px;padding:5px 0;" onclick="confirmRestoreMaker(${d.id})">返却を取り消す</button>
+        </div>
+        ${history.length > 0 ? `
+        <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+          <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px;">貸出履歴</div>
+          ${history.map(l => `
+          <div class="history-item">
+            <span class="history-type ${l.type==='貸出'?'loan':'ret'}">${l.type}</span>
+            <div class="history-detail">${l.type==='貸出' ? fmtDate(l.date) + ' ・ ' + (l.loanTo||'—') + ' ・ ' + (l.salesRep||'—') : fmtDate(l.date) + ' 返却'}</div>
+          </div>`).join('')}
+        </div>` : ''}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
 function renderDisposedDevices() {
   const disposed = db.devices.filter(d => d.status === '廃棄');
   return `
@@ -1474,6 +1550,10 @@ function renderSettings() {
       </div>
       <div class="settings-item" onclick="navigate('disposedDevices', {})">
         <span class="settings-label">廃棄済み商品</span>
+        <span class="settings-arrow">›</span>
+      </div>
+      <div class="settings-item" onclick="navigate('makerReturnedDevices', {})">
+        <span class="settings-label">メーカー返却済み商品</span>
         <span class="settings-arrow">›</span>
       </div>
     </div>
