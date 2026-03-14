@@ -1273,6 +1273,8 @@ async function submitRegister() {
   const maker = document.getElementById('f-maker').value.trim();
   const notes = document.getElementById('f-notes').value.trim();
 
+  console.log('[DEBUG] submitRegister 開始:', { labelId, name, type, maker, notes });
+
   if (!labelId) { showToast('LabelIDを入力してください', 'error'); return; }
   if (!name) { showToast('機器名を入力してください', 'error'); return; }
   if (db.devices.find(d => d.labelId === labelId)) {
@@ -1295,14 +1297,20 @@ async function submitRegister() {
     createdAt: today(),
   };
 
+  console.log('[DEBUG] 登録する機器データ:', newDevice);
+  console.log('[DEBUG] saveDB呼び出し前のdb.devices数:', db.devices.length);
+
   db.devices.push(newDevice);
   showLoading();
   try {
     await saveDB();
+    console.log('[DEBUG] saveDB 成功');
     showToast('機器を登録しました ✓', 'success');
     viewStack = [];
     navigate('deviceDetail', { deviceId: newDevice.id });
-  } catch(e) {} finally {
+  } catch(e) {
+    console.error('[DEBUG] submitRegister catch:', e);
+  } finally {
     hideLoading();
   }
 }
