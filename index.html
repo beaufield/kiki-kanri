@@ -594,12 +594,28 @@ async function apiGet() {
 }
 
 async function apiPost(action, data) {
+  // URLSearchParams形式で送信（GASのe.parameterで受け取り可能、CORSプリフライト不要）
+  const params = new URLSearchParams();
+  params.append('action', action);
+  params.append('data', JSON.stringify(data));
+
   const res = await fetch(API_URL, {
     method: 'POST',
-    body: JSON.stringify({ action, data }),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
   });
   if (!res.ok) throw new Error('API error');
-  return res.json();
+
+  const json = await res.json();
+
+  // POSTがGETにリダイレクトされた場合の検出:
+  // doGetのレスポンス（devicesキーがある）が返ってきた場合はエラー扱い
+  if (json && 'devices' in json && !('status' in json)) {
+    console.error('POSTリクエストがGETにリダイレクトされました。GASスクリプトのdoPost設定を確認してください。');
+    throw new Error('POST redirect');
+  }
+
+  return json;
 }
 
 async function loadDB() {
@@ -620,7 +636,11 @@ async function saveDB() {
   try {
     await apiPost('saveDB', db);
   } catch(e) {
-    showToast('通信エラーが発生しました', 'error');
+    if (e.message === 'POST redirect') {
+      showToast('保存に失敗しました（GAS設定を確認してください）', 'error');
+    } else {
+      showToast('通信エラーが発生しました', 'error');
+    }
     throw e;
   }
 }
