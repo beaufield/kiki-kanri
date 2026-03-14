@@ -1308,9 +1308,12 @@ async function submitRegister() {
   try {
     await apiPost('saveDevice', newDevice);
     console.log('[DEBUG] saveDevice 成功');
+    // スプレッドシートから最新データを再取得
+    db = await apiGet();
+    const saved = db.devices.find(d => d.labelId === newDevice.labelId);
     showToast('機器を登録しました ✓', 'success');
     viewStack = [];
-    navigate('deviceDetail', { deviceId: newDevice.id });
+    navigate('deviceDetail', { deviceId: saved ? saved.id : newDevice.id });
   } catch(e) {
     console.error('[DEBUG] submitRegister catch:', e);
   } finally {
