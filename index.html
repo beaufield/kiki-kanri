@@ -1394,6 +1394,7 @@ async function submitReturn(deviceId) {
 // ========== REGISTER FORM ==========
 function renderRegisterForm() {
   const availableLabels = (db.labels || []).filter(l => l.status === '印刷済');
+  const preselected = viewData.labelId || ''; // スキャン画面から渡されたLabelID
 
   return `
   <div class="header">
@@ -1407,7 +1408,7 @@ function renderRegisterForm() {
       ${availableLabels.length > 0
         ? `<select class="form-select" id="f-labelid">
         <option value="">ラベルを選択してください</option>
-        ${availableLabels.map(l => `<option value="${l.labelId}">${l.labelId}</option>`).join('')}
+        ${availableLabels.map(l => `<option value="${l.labelId}" ${l.labelId === preselected ? 'selected' : ''}>${l.labelId}</option>`).join('')}
       </select>`
         : `<div style="padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;color:var(--text-sub);background:white;">使用可能なラベルがありません。ラベル管理から発行してください。</div><input type="hidden" id="f-labelid" value="">`
       }
