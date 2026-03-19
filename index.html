@@ -601,7 +601,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.5.2';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -2254,32 +2254,58 @@ function scanFrame(timestamp) {
     scannerCanvas.height = ch;
   }
 
-  scannerCtx.drawImage(video, 0, 0, cw, ch);
-  let imageData;
+  // iPhoneの縦持ち時にvideoWidth < videoHeightになる（720x1280）。
+  // canvasに描画する際に回転を補正する。
+  const isPortrait = vw < vh;
+  if (isPortrait) {
+    // 縦持ち: canvasを横向きに設定し、90度回転して描画
+    if (scannerCanvas.width !== ch || scannerCanvas.height !== cw) {
+      scannerCanvas.width = ch;
+      scannerCanvas.height = cw;
+      dbgLog(`縦持ち補正: canvas=${ch}x${cw}`);
+    }
+    scannerCtx.save();
+    scannerCtx.translate(ch / 2, cw / 2);
+    scannerCtx.rotate(Math.PI / 2);
+    scannerCtx.drawImage(video, -cw / 2, -ch / 2, cw, ch);
+    scannerCtx.restore();
+  } else {
+    if (scannerCanvas.width !== cw || scannerCanvas.height !== ch) {
+      scannerCanvas.width = cw;
+      scannerCanvas.height = ch;
+    }
+    scannerCtx.drawImage(video, 0, 0, cw, ch);
+  }
+
+  // getImageData・jsQR を丸ごと try/catch で囲む
+  // （例外でループが止まらないよう finally で必ずRAFを継続）
+  let detected = false;
   try {
-    imageData = scannerCtx.getImageData(0, 0, cw, ch);
+    const iw = isPortrait ? ch : cw;
+    const ih = isPortrait ? cw : ch;
+    const imageData = scannerCtx.getImageData(0, 0, iw, ih);
+
+    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: 'attemptBoth',
+    });
+
+    // jsQR結果を50フレームに1回ログ（nullが延々続く場合の確認用）
+    if (dbgFrameCount % 50 === 1) {
+      dbgLog(`jsQR結果: ${code ? '検出! → '+code.data : 'null'} canvas=${iw}x${ih}`);
+    }
+
+    if (code && code.data) {
+      dbgLog(`QR検出成功: ${code.data}`);
+      detected = true;
+      stopScanner();
+      handleScannedLabel(code.data.trim().toUpperCase());
+    }
   } catch(e) {
-    dbgLog(`ERROR getImageData失敗: ${e.name}: ${e.message}`);
-    requestAnimationFrame(scanFrame);
-    return;
+    dbgLog(`ERROR jsQR処理失敗: ${e.name}: ${e.message}`);
+  } finally {
+    // 検出済みでなければ必ずループを継続（例外時もここに来る）
+    if (!detected) requestAnimationFrame(scanFrame);
   }
-
-  const code = jsQR(imageData.data, imageData.width, imageData.height, {
-    inversionAttempts: 'dontInvert', // iPhoneでの処理速度向上
-  });
-
-  // jsQR結果を50フレームに1回ログ（nullが延々続く場合の確認用）
-  if (dbgFrameCount % 50 === 1) {
-    dbgLog(`jsQR結果: ${code ? '検出! → '+code.data : 'null'} canvas=${cw}x${ch}`);
-  }
-
-  if (code && code.data) {
-    dbgLog(`QR検出成功: ${code.data}`);
-    stopScanner();
-    handleScannedLabel(code.data.trim().toUpperCase());
-    return;
-  }
-  requestAnimationFrame(scanFrame);
 }
 
 // ========== INIT ==========
