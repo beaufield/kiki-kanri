@@ -1025,6 +1025,21 @@ let scannerCtx = null;      // getContextも使い回す
 let scannerLastScan = 0;    // スロットル用タイムスタンプ
 const SCAN_INTERVAL_MS = 150; // 150msごとに1回スキャン（約6fps）
 
+// ---- デバッグログ ----
+const DBG_MAX = 10; // 最大保持件数
+let dbgLogs = [];
+let dbgFrameCount = 0; // scanFrame呼び出し回数（毎フレームDOMを触らないためカウンタで管理）
+function dbgLog(msg) {
+  const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
+  const line = `[${ts}] ${msg}`;
+  console.log('[SCAN]', msg);
+  dbgLogs.push(line);
+  if (dbgLogs.length > DBG_MAX) dbgLogs.shift();
+  // 画面上のオーバーレイを更新
+  const el = document.getElementById('dbg-overlay');
+  if (el) el.textContent = dbgLogs.join('\n');
+}
+
 function stopScanner() {
   scannerActive = false;
   if (scannerStream) {
@@ -1063,6 +1078,27 @@ function renderScanner() {
     <button class="btn btn-primary" onclick="navigate('registerForm', {})">
       ＋ 新規商品を登録する
     </button>` : ''}
+
+    <!-- デバッグオーバーレイ（iPhone Safari用） -->
+    <div style="margin-top:16px;">
+      <div style="font-size:11px;font-weight:700;color:var(--text-sub);margin-bottom:4px;">🔍 デバッグログ（最新${DBG_MAX}件）</div>
+      <pre id="dbg-overlay" style="
+        background:#111827;
+        color:#86efac;
+        font-size:10px;
+        line-height:1.5;
+        padding:10px 12px;
+        border-radius:8px;
+        white-space:pre-wrap;
+        word-break:break-all;
+        min-height:80px;
+        font-family:monospace;
+      ">ログ待機中...</pre>
+      <button onclick="dbgLogs=[];const el=document.getElementById('dbg-overlay');if(el)el.textContent='クリアしました';"
+        style="margin-top:6px;font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:white;cursor:pointer;">
+        ログをクリア
+      </button>
+    </div>
   </div>
   ${renderNav()}`;
 }
@@ -2127,34 +2163,45 @@ function afterRender() {
 
 function startScanner() {
   const video = document.getElementById('qr-video');
-  if (!video) return;
+  if (!video) { dbgLog('ERROR: video要素が見つかりません'); return; }
+
+  dbgLog(`startScanner開始 UA=${navigator.userAgent.slice(0,60)}`);
 
   // iPhone Safari では exact指定だと許可ダイアログが出ない場合があるため
   // まず ideal で試み、失敗時は制約なしにフォールバック
   const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
 
   navigator.mediaDevices.getUserMedia(constraints)
-    .catch(() => navigator.mediaDevices.getUserMedia({ video: true })) // フォールバック
+    .catch(err => {
+      dbgLog(`getUserMedia失敗(ideal): ${err.name} → フォールバック`);
+      return navigator.mediaDevices.getUserMedia({ video: true });
+    })
     .then(stream => {
+      const track = stream.getVideoTracks()[0];
+      const settings = track ? track.getSettings() : {};
+      dbgLog(`カメラ取得OK: ${settings.width}x${settings.height} facing=${settings.facingMode||'不明'}`);
       scannerStream = stream;
       video.srcObject = stream;
       video.setAttribute('playsinline', 'true'); // iOS Safari対策
       video.setAttribute('muted', 'true');
       video.play();
       scannerActive = true;
+      dbgLog('video.play()呼び出し済み');
       // videoが実際に再生開始してからスキャン開始
       video.addEventListener('playing', () => {
+        dbgLog(`playingイベント発火 videoSize=${video.videoWidth}x${video.videoHeight}`);
         requestAnimationFrame(scanFrame);
       }, { once: true });
       // playing イベントが来ない場合の保険（500ms後に強制開始）
       setTimeout(() => {
         if (scannerActive && scannerLastScan === 0) {
+          dbgLog(`500msタイムアウト → 強制スキャン開始 readyState=${video.readyState}`);
           requestAnimationFrame(scanFrame);
         }
       }, 500);
     })
     .catch(err => {
-      console.warn('Camera error:', err);
+      dbgLog(`ERROR カメラ取得失敗: ${err.name}: ${err.message}`);
       const wrap = document.querySelector('.scanner-wrap');
       if (wrap) wrap.innerHTML = `<div style="color:white;padding:40px;text-align:center;font-size:14px;">カメラを使用できません。<br>LabelIDを直接入力してください。</div>`;
     });
@@ -2162,10 +2209,20 @@ function startScanner() {
 
 function scanFrame(timestamp) {
   if (!scannerActive) return;
+
+  dbgFrameCount++;
+  // 全フレームログは多すぎるため10フレームに1回だけ「frame called」を記録
+  if (dbgFrameCount % 10 === 1) {
+    dbgLog(`frame called #${dbgFrameCount}`);
+  }
+
   const video = document.getElementById('qr-video');
 
   // videoが準備できていない場合は次フレームへ
   if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+    if (dbgFrameCount % 10 === 1) {
+      dbgLog(`video未準備 readyState=${video ? video.readyState : 'null'} size=${video ? video.videoWidth+'x'+video.videoHeight : '-'}`);
+    }
     requestAnimationFrame(scanFrame);
     return;
   }
@@ -2190,6 +2247,7 @@ function scanFrame(timestamp) {
     scannerCanvas = document.createElement('canvas');
     // willReadFrequently: trueでiOS Safariのピクセル読み取りを高速化
     scannerCtx = scannerCanvas.getContext('2d', { willReadFrequently: true });
+    dbgLog(`canvas初期化 ${cw}x${ch} (元映像${vw}x${vh})`);
   }
   if (scannerCanvas.width !== cw || scannerCanvas.height !== ch) {
     scannerCanvas.width = cw;
@@ -2201,7 +2259,7 @@ function scanFrame(timestamp) {
   try {
     imageData = scannerCtx.getImageData(0, 0, cw, ch);
   } catch(e) {
-    // セキュリティエラー等の場合は継続
+    dbgLog(`ERROR getImageData失敗: ${e.name}: ${e.message}`);
     requestAnimationFrame(scanFrame);
     return;
   }
@@ -2209,7 +2267,14 @@ function scanFrame(timestamp) {
   const code = jsQR(imageData.data, imageData.width, imageData.height, {
     inversionAttempts: 'dontInvert', // iPhoneでの処理速度向上
   });
+
+  // jsQR結果を50フレームに1回ログ（nullが延々続く場合の確認用）
+  if (dbgFrameCount % 50 === 1) {
+    dbgLog(`jsQR結果: ${code ? '検出! → '+code.data : 'null'} canvas=${cw}x${ch}`);
+  }
+
   if (code && code.data) {
+    dbgLog(`QR検出成功: ${code.data}`);
     stopScanner();
     handleScannedLabel(code.data.trim().toUpperCase());
     return;
