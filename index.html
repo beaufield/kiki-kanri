@@ -618,7 +618,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.5.3';
+const APP_VERSION = '1.5.4';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -1042,18 +1042,8 @@ let scannerCtx = null;
 let barcodeDetector = null;   // ネイティブBarcodeDetector（iOS17+）
 const SCAN_INTERVAL_MS = 150; // スキャン間隔（ms）
 
-// ---- デバッグログ ----
-const DBG_MAX = 10;
-let dbgLogs = [];
-let dbgFrameCount = 0;
 function dbgLog(msg) {
-  const ts = new Date().toISOString().slice(11, 23);
-  const line = `[${ts}] ${msg}`;
   console.log('[SCAN]', msg);
-  dbgLogs.push(line);
-  if (dbgLogs.length > DBG_MAX) dbgLogs.shift();
-  const el = document.getElementById('dbg-overlay');
-  if (el) el.textContent = dbgLogs.join('\n');
 }
 
 function stopScanner() {
@@ -1095,26 +1085,6 @@ function renderScanner() {
       ＋ 新規商品を登録する
     </button>` : ''}
 
-    <!-- デバッグオーバーレイ（iPhone Safari用） -->
-    <div style="margin-top:16px;">
-      <div style="font-size:11px;font-weight:700;color:var(--text-sub);margin-bottom:4px;">🔍 デバッグログ（最新${DBG_MAX}件）</div>
-      <pre id="dbg-overlay" style="
-        background:#111827;
-        color:#86efac;
-        font-size:10px;
-        line-height:1.5;
-        padding:10px 12px;
-        border-radius:8px;
-        white-space:pre-wrap;
-        word-break:break-all;
-        min-height:80px;
-        font-family:monospace;
-      ">ログ待機中...</pre>
-      <button onclick="dbgLogs=[];const el=document.getElementById('dbg-overlay');if(el)el.textContent='クリアしました';"
-        style="margin-top:6px;font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:white;cursor:pointer;">
-        ログをクリア
-      </button>
-    </div>
   </div>
   ${renderNav()}`;
 }
@@ -2253,17 +2223,14 @@ function waitForVideoAndScan(video) {
 
 async function scanTick(video) {
   if (!scannerActive) return;
-  dbgFrameCount++;
-  if (dbgFrameCount % 10 === 1) dbgLog(`tick #${dbgFrameCount}`);
 
   let detected = false;
   try {
     if (barcodeDetector) {
       // ── ネイティブ BarcodeDetector（iOS17+）──
       const barcodes = await barcodeDetector.detect(video);
-      if (dbgFrameCount % 20 === 1) dbgLog(`BarcodeDetector: ${barcodes.length}件検出`);
       if (barcodes.length > 0) {
-        dbgLog(`QR検出! ${barcodes[0].rawValue}`);
+        dbgLog(`QR検出(BD): ${barcodes[0].rawValue}`);
         detected = true;
         stopScanner();
         handleScannedLabel(barcodes[0].rawValue.trim().toUpperCase());
@@ -2278,7 +2245,6 @@ async function scanTick(video) {
       if (!scannerCanvas) {
         scannerCanvas = document.createElement('canvas');
         scannerCtx = scannerCanvas.getContext('2d', { willReadFrequently: true });
-        dbgLog(`jsQR canvas初期化 ${cw}x${ch} portrait=${isPortrait}`);
       }
       if (isPortrait) {
         scannerCanvas.width = ch; scannerCanvas.height = cw;
@@ -2294,15 +2260,14 @@ async function scanTick(video) {
       const iw = isPortrait ? ch : cw, ih = isPortrait ? cw : ch;
       const imageData = scannerCtx.getImageData(0, 0, iw, ih);
       const code = jsQR(imageData.data, iw, ih, { inversionAttempts: 'attemptBoth' });
-      if (dbgFrameCount % 20 === 1) dbgLog(`jsQR: ${code ? '検出! '+code.data : 'null'} ${iw}x${ih}`);
       if (code && code.data) {
-        dbgLog(`QR検出! ${code.data}`);
+        dbgLog(`QR検出(jsQR): ${code.data}`);
         detected = true;
         stopScanner();
         handleScannedLabel(code.data.trim().toUpperCase());
       }
     } else {
-      if (dbgFrameCount % 20 === 1) dbgLog('ERROR: スキャン手段なし（jsQR未ロード・BD未対応）');
+      dbgLog('ERROR: スキャン手段なし（jsQR未ロード・BarcodeDetector未対応）');
     }
   } catch(e) {
     dbgLog(`ERROR scanTick: ${e.name}: ${e.message}`);
