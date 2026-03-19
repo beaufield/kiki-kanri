@@ -601,7 +601,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.1';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -1020,6 +1020,10 @@ function renderDevices() {
 let scannerActive = false;
 let scannerStream = null;
 let scannerMode = '';
+let scannerCanvas = null;   // canvasを使い回す（毎フレーム生成しない）
+let scannerCtx = null;      // getContextも使い回す
+let scannerLastScan = 0;    // スロットル用タイムスタンプ
+const SCAN_INTERVAL_MS = 150; // 150msごとに1回スキャン（約6fps）
 
 function stopScanner() {
   scannerActive = false;
@@ -1027,6 +1031,9 @@ function stopScanner() {
     scannerStream.getTracks().forEach(t => t.stop());
     scannerStream = null;
   }
+  scannerCanvas = null;
+  scannerCtx = null;
+  scannerLastScan = 0;
 }
 
 function renderScanner() {
@@ -2121,14 +2128,30 @@ function afterRender() {
 function startScanner() {
   const video = document.getElementById('qr-video');
   if (!video) return;
-  
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+
+  // iPhone Safari では exact指定だと許可ダイアログが出ない場合があるため
+  // まず ideal で試み、失敗時は制約なしにフォールバック
+  const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
+
+  navigator.mediaDevices.getUserMedia(constraints)
+    .catch(() => navigator.mediaDevices.getUserMedia({ video: true })) // フォールバック
     .then(stream => {
       scannerStream = stream;
       video.srcObject = stream;
+      video.setAttribute('playsinline', 'true'); // iOS Safari対策
+      video.setAttribute('muted', 'true');
       video.play();
       scannerActive = true;
-      requestAnimationFrame(scanFrame);
+      // videoが実際に再生開始してからスキャン開始
+      video.addEventListener('playing', () => {
+        requestAnimationFrame(scanFrame);
+      }, { once: true });
+      // playing イベントが来ない場合の保険（500ms後に強制開始）
+      setTimeout(() => {
+        if (scannerActive && scannerLastScan === 0) {
+          requestAnimationFrame(scanFrame);
+        }
+      }, 500);
     })
     .catch(err => {
       console.warn('Camera error:', err);
@@ -2137,20 +2160,55 @@ function startScanner() {
     });
 }
 
-function scanFrame() {
+function scanFrame(timestamp) {
   if (!scannerActive) return;
   const video = document.getElementById('qr-video');
-  if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) {
+
+  // videoが準備できていない場合は次フレームへ
+  if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
     requestAnimationFrame(scanFrame);
     return;
   }
-  const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0);
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+  // スロットル: SCAN_INTERVAL_MS より短い間隔はスキップ
+  if (timestamp - scannerLastScan < SCAN_INTERVAL_MS) {
+    requestAnimationFrame(scanFrame);
+    return;
+  }
+  scannerLastScan = timestamp;
+
+  // canvasを使い回す（iPhone Safariでの毎フレーム生成を避ける）
+  // 解像度は最大640pxにスケールダウン（処理速度向上）
+  const MAX_SIZE = 640;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const scale = Math.min(1, MAX_SIZE / Math.max(vw, vh));
+  const cw = Math.floor(vw * scale);
+  const ch = Math.floor(vh * scale);
+
+  if (!scannerCanvas) {
+    scannerCanvas = document.createElement('canvas');
+    // willReadFrequently: trueでiOS Safariのピクセル読み取りを高速化
+    scannerCtx = scannerCanvas.getContext('2d', { willReadFrequently: true });
+  }
+  if (scannerCanvas.width !== cw || scannerCanvas.height !== ch) {
+    scannerCanvas.width = cw;
+    scannerCanvas.height = ch;
+  }
+
+  scannerCtx.drawImage(video, 0, 0, cw, ch);
+  let imageData;
+  try {
+    imageData = scannerCtx.getImageData(0, 0, cw, ch);
+  } catch(e) {
+    // セキュリティエラー等の場合は継続
+    requestAnimationFrame(scanFrame);
+    return;
+  }
+
+  const code = jsQR(imageData.data, imageData.width, imageData.height, {
+    inversionAttempts: 'dontInvert', // iPhoneでの処理速度向上
+  });
   if (code && code.data) {
     stopScanner();
     handleScannedLabel(code.data.trim().toUpperCase());
