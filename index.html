@@ -601,7 +601,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -611,6 +611,7 @@ let db = {
   loans: [],
   salesReps: [],
   makers: [],
+  labels: [],
   nextDeviceId: 1,
   nextLoanId: 1,
   nextRepId: 1,
@@ -813,6 +814,7 @@ function render() {
     settings: renderSettings,
     salesReps: renderSalesReps,
     makers: renderMakers,
+    labelPool: renderLabelPool,
     disposedDevices: renderDisposedDevices,
     makerReturnedDevices: renderMakerReturnedDevices,
   };
@@ -1362,7 +1364,7 @@ async function submitReturn(deviceId) {
 
 // ========== REGISTER FORM ==========
 function renderRegisterForm() {
-  const labelId = viewData.labelId || '';
+  const availableLabels = (db.labels || []).filter(l => l.status === '印刷済');
 
   return `
   <div class="header">
@@ -1373,7 +1375,13 @@ function renderRegisterForm() {
   <div class="content">
     <div class="form-section">
       <div class="form-label">LabelID <span class="required">*</span></div>
-      <input class="form-input" id="f-labelid" placeholder="例: BF-000001" value="${labelId}" style="text-transform:uppercase;" autocomplete="off">
+      ${availableLabels.length > 0
+        ? `<select class="form-select" id="f-labelid">
+        <option value="">ラベルを選択してください</option>
+        ${availableLabels.map(l => `<option value="${l.labelId}">${l.labelId}</option>`).join('')}
+      </select>`
+        : `<div style="padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;color:var(--text-sub);background:white;">使用可能なラベルがありません。ラベル管理から発行してください。</div><input type="hidden" id="f-labelid" value="">`
+      }
     </div>
     <div class="form-section">
       <div class="form-label">商品名 <span class="required">*</span></div>
@@ -1476,7 +1484,7 @@ async function submitRegister() {
   const makerDue = document.getElementById('f-maker-due').value;
   const notes = document.getElementById('f-notes').value.trim();
 
-  if (!labelId) { showToast('LabelIDを入力してください', 'error'); return; }
+  if (!labelId) { showToast('使用可能なラベルを選択してください', 'error'); return; }
   if (!name) { showToast('商品名を入力してください', 'error'); return; }
   if (db.devices.find(d => d.labelId === labelId)) {
     showToast('このLabelIDはすでに使用されています', 'error'); return;
@@ -1505,6 +1513,7 @@ async function submitRegister() {
     const imageUrl = await uploadPendingImage('reg');
     if (imageUrl) newDevice.imageUrl = imageUrl;
     await apiPost('saveDevice', newDevice);
+    await apiPost('assignLabel', { labelId });
     pendingImages['reg'] = null;
     // スプレッドシートから最新データを再取得
     db = await apiGet();
@@ -1789,6 +1798,10 @@ function renderSettings() {
         <span class="settings-label">メーカーマスタ</span>
         <span class="settings-arrow">›</span>
       </div>
+      <div class="settings-item" onclick="navigate('labelPool', {})">
+        <span class="settings-label">ラベル管理</span>
+        <span class="settings-arrow">›</span>
+      </div>
       <div class="settings-item" onclick="navigate('disposedDevices', {})">
         <span class="settings-label">廃棄済み商品</span>
         <span class="settings-arrow">›</span>
@@ -1884,6 +1897,109 @@ async function addRep() {
     showToast('追加しました ✓', 'success');
     render();
   } catch(e) {} finally {
+    hideLoading();
+  }
+}
+
+// ========== LABEL POOL ==========
+function renderLabelPool() {
+  const labels = db.labels || [];
+  const unprinted = labels.filter(l => l.status === '未印刷');
+  const printed   = labels.filter(l => l.status === '印刷済');
+  const assigned  = labels.filter(l => l.status === '割当済');
+  const showPrintBtn = viewData.showPrintBtn || false;
+
+  return `
+  <div class="header">
+    <div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>
+    <h1>ラベル管理</h1>
+    <div></div>
+  </div>
+  <div class="content">
+
+    <div class="section-title">ラベル在庫状況</div>
+    <div class="stats" style="grid-template-columns:repeat(2,1fr);">
+      <div class="stat-card">
+        <div class="stat-num" style="font-size:22px;">${unprinted.length}</div>
+        <div class="stat-label">未使用・未印刷</div>
+      </div>
+      <div class="stat-card warn">
+        <div class="stat-num" style="font-size:22px;">${printed.length}</div>
+        <div class="stat-label">未使用・印刷済</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" style="font-size:22px;">${assigned.length}</div>
+        <div class="stat-label">割当済</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" style="font-size:22px;">${labels.length}</div>
+        <div class="stat-label">合計枚数</div>
+      </div>
+    </div>
+
+    <div class="section-title">ラベル発行</div>
+    <div class="card" style="padding:16px;">
+      <div class="form-section">
+        <div class="form-label">発行枚数</div>
+        <input class="form-input" id="f-issue-count" type="number" min="1" max="200" value="50">
+      </div>
+      <button class="btn btn-primary" onclick="issueLabels()">発行する</button>
+    </div>
+
+    <div class="section-title">CSV出力 / 印刷管理</div>
+    <div class="card" style="padding:16px;">
+      ${unprinted.length > 0
+        ? `<button class="btn btn-outline" onclick="exportLabelCSV()" style="margin-bottom:10px;">📄 印刷用CSVを出力（${unprinted.length}枚）</button>`
+        : `<p style="font-size:14px;color:var(--text-sub);margin-bottom:10px;">未印刷のラベルはありません</p>`
+      }
+      ${showPrintBtn
+        ? `<button class="btn" style="background:var(--success);color:white;" onclick="markPrinted()">✓ 印刷済みにする</button>`
+        : ''
+      }
+    </div>
+
+  </div>`;
+}
+
+async function issueLabels() {
+  const count = parseInt(document.getElementById('f-issue-count').value, 10);
+  if (!count || count < 1) { showToast('発行枚数を入力してください', 'error'); return; }
+  showLoading();
+  try {
+    await apiPost('issueLabel', { count });
+    db = await apiGet();
+    showToast(`${count}枚のラベルを発行しました ✓`, 'success');
+    viewData.showPrintBtn = false;
+    render();
+  } catch(e) {
+    showToast('エラーが発生しました', 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+function exportLabelCSV() {
+  const unprinted = (db.labels || []).filter(l => l.status === '未印刷');
+  if (unprinted.length === 0) { showToast('未印刷のラベルがありません', 'error'); return; }
+  const rows = [['labelId'], ...unprinted.map(l => [l.labelId])];
+  downloadCSV(rows, 'ラベル印刷用.csv');
+  viewData.showPrintBtn = true;
+  render();
+}
+
+async function markPrinted() {
+  const unprintedIds = (db.labels || []).filter(l => l.status === '未印刷').map(l => l.labelId);
+  if (unprintedIds.length === 0) { showToast('対象ラベルがありません', 'error'); return; }
+  showLoading();
+  try {
+    await apiPost('updatePrintStatus', { labelIds: unprintedIds });
+    db = await apiGet();
+    showToast('印刷済みに更新しました ✓', 'success');
+    viewData.showPrintBtn = false;
+    render();
+  } catch(e) {
+    showToast('エラーが発生しました', 'error');
+  } finally {
     hideLoading();
   }
 }
