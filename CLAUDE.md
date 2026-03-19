@@ -22,6 +22,9 @@
 - `LoanLog` — 貸出ログ
 - `SalesRep` — 営業担当マスタ
 - `MakerMaster` — メーカーマスタ
+- `LabelPool` — ラベル管理（列: id / labelId / status / issuedAt / printedAt / assignedAt / deviceId）
+  - status値: `未印刷` / `印刷済` / `割当済`
+  - labelId形式: `BF-00001`（BF-+5桁ゼロ埋め連番）
 
 ## 実装済み機能
 - 商品登録・貸出・返却の基本CRUD
@@ -66,5 +69,7 @@
 
 ## コーディングルール
 - **コードを修正・提示するときは必ず全文差し替え形式で提供する**（部分スニペット不可）
+- これは `index.html` / `Code.gs` の両方に適用される絶対ルール
+- 部分的な追記・差分提示は誤適用・混乱の原因になるため厳禁
 - CSSはインラインで`<style>`タグ内に記述
 - JSはインラインで`<script>`タグ内に記述
