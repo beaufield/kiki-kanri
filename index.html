@@ -4,7 +4,24 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ビューフィールド貸出管理</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<!-- jsQR: jsdelivr → unpkg の順でフォールバック読み込み -->
+<script>
+(function(){
+  var cdns = [
+    'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js',
+    'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'
+  ];
+  var i = 0;
+  function tryLoad() {
+    if (i >= cdns.length) return;
+    var s = document.createElement('script');
+    s.src = cdns[i++];
+    s.onerror = tryLoad; // 失敗したら次のCDNを試す
+    document.head.appendChild(s);
+  }
+  tryLoad();
+})();
+</script>
 <style>
   :root {
     --bg: #f0f2f5;
@@ -601,7 +618,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.5.2';
+const APP_VERSION = '1.5.3';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -1020,22 +1037,21 @@ function renderDevices() {
 let scannerActive = false;
 let scannerStream = null;
 let scannerMode = '';
-let scannerCanvas = null;   // canvasを使い回す（毎フレーム生成しない）
-let scannerCtx = null;      // getContextも使い回す
-let scannerLastScan = 0;    // スロットル用タイムスタンプ
-const SCAN_INTERVAL_MS = 150; // 150msごとに1回スキャン（約6fps）
+let scannerCanvas = null;
+let scannerCtx = null;
+let barcodeDetector = null;   // ネイティブBarcodeDetector（iOS17+）
+const SCAN_INTERVAL_MS = 150; // スキャン間隔（ms）
 
 // ---- デバッグログ ----
-const DBG_MAX = 10; // 最大保持件数
+const DBG_MAX = 10;
 let dbgLogs = [];
-let dbgFrameCount = 0; // scanFrame呼び出し回数（毎フレームDOMを触らないためカウンタで管理）
+let dbgFrameCount = 0;
 function dbgLog(msg) {
-  const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
+  const ts = new Date().toISOString().slice(11, 23);
   const line = `[${ts}] ${msg}`;
   console.log('[SCAN]', msg);
   dbgLogs.push(line);
   if (dbgLogs.length > DBG_MAX) dbgLogs.shift();
-  // 画面上のオーバーレイを更新
   const el = document.getElementById('dbg-overlay');
   if (el) el.textContent = dbgLogs.join('\n');
 }
@@ -1048,7 +1064,7 @@ function stopScanner() {
   }
   scannerCanvas = null;
   scannerCtx = null;
-  scannerLastScan = 0;
+  barcodeDetector = null;
 }
 
 function renderScanner() {
@@ -2161,150 +2177,140 @@ function afterRender() {
   }
 }
 
+async function initBarcodeDetector() {
+  // iOS17+ / Chrome83+ のネイティブQR検出APIを初期化
+  try {
+    if ('BarcodeDetector' in window) {
+      const formats = await BarcodeDetector.getSupportedFormats();
+      if (formats.includes('qr_code')) {
+        barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+        dbgLog('BarcodeDetector: ネイティブAPI使用（推奨）');
+        return;
+      }
+    }
+  } catch(e) {
+    dbgLog(`BarcodeDetector初期化失敗: ${e.message}`);
+  }
+  // フォールバック: jsQRの読み込み状況を確認
+  if (typeof jsQR !== 'undefined') {
+    dbgLog('jsQR: ライブラリ使用（フォールバック）');
+  } else {
+    dbgLog('ERROR: BarcodeDetector未対応かつjsQR未ロード。スキャン不可。');
+  }
+}
+
 function startScanner() {
   const video = document.getElementById('qr-video');
   if (!video) { dbgLog('ERROR: video要素が見つかりません'); return; }
+  dbgLog(`startScanner UA=${navigator.userAgent.slice(0,50)}`);
 
-  dbgLog(`startScanner開始 UA=${navigator.userAgent.slice(0,60)}`);
-
-  // iPhone Safari では exact指定だと許可ダイアログが出ない場合があるため
-  // まず ideal で試み、失敗時は制約なしにフォールバック
   const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
 
   navigator.mediaDevices.getUserMedia(constraints)
     .catch(err => {
-      dbgLog(`getUserMedia失敗(ideal): ${err.name} → フォールバック`);
+      dbgLog(`getUserMedia失敗: ${err.name} → フォールバック`);
       return navigator.mediaDevices.getUserMedia({ video: true });
     })
-    .then(stream => {
+    .then(async stream => {
       const track = stream.getVideoTracks()[0];
-      const settings = track ? track.getSettings() : {};
-      dbgLog(`カメラ取得OK: ${settings.width}x${settings.height} facing=${settings.facingMode||'不明'}`);
+      const s = track ? track.getSettings() : {};
+      dbgLog(`カメラOK: ${s.width}x${s.height} facing=${s.facingMode||'不明'}`);
       scannerStream = stream;
       video.srcObject = stream;
-      video.setAttribute('playsinline', 'true'); // iOS Safari対策
+      video.setAttribute('playsinline', 'true');
       video.setAttribute('muted', 'true');
-      video.play();
       scannerActive = true;
-      dbgLog('video.play()呼び出し済み');
-      // videoが実際に再生開始してからスキャン開始
-      video.addEventListener('playing', () => {
-        dbgLog(`playingイベント発火 videoSize=${video.videoWidth}x${video.videoHeight}`);
-        requestAnimationFrame(scanFrame);
-      }, { once: true });
-      // playing イベントが来ない場合の保険（500ms後に強制開始）
-      setTimeout(() => {
-        if (scannerActive && scannerLastScan === 0) {
-          dbgLog(`500msタイムアウト → 強制スキャン開始 readyState=${video.readyState}`);
-          requestAnimationFrame(scanFrame);
-        }
-      }, 500);
+      await initBarcodeDetector();
+      await video.play();
+      dbgLog(`video再生開始 size=${video.videoWidth}x${video.videoHeight}`);
+      // video準備完了を待ってスキャン開始
+      waitForVideoAndScan(video);
     })
     .catch(err => {
-      dbgLog(`ERROR カメラ取得失敗: ${err.name}: ${err.message}`);
+      dbgLog(`ERROR カメラ失敗: ${err.name}: ${err.message}`);
       const wrap = document.querySelector('.scanner-wrap');
       if (wrap) wrap.innerHTML = `<div style="color:white;padding:40px;text-align:center;font-size:14px;">カメラを使用できません。<br>LabelIDを直接入力してください。</div>`;
     });
 }
 
-function scanFrame(timestamp) {
+function waitForVideoAndScan(video) {
+  // videoWidth が確定するまで最大3秒待つ
+  let tries = 0;
+  function check() {
+    if (!scannerActive) return;
+    if (video.videoWidth > 0 && video.readyState >= 2) {
+      dbgLog(`スキャン開始 video=${video.videoWidth}x${video.videoHeight}`);
+      scanTick(video);
+    } else {
+      tries++;
+      if (tries > 30) { dbgLog('ERROR: video準備タイムアウト(3秒)'); return; }
+      if (tries % 5 === 1) dbgLog(`video待機 readyState=${video.readyState} size=${video.videoWidth}x${video.videoHeight}`);
+      setTimeout(check, 100);
+    }
+  }
+  setTimeout(check, 100);
+}
+
+async function scanTick(video) {
   if (!scannerActive) return;
-
   dbgFrameCount++;
-  // 全フレームログは多すぎるため10フレームに1回だけ「frame called」を記録
-  if (dbgFrameCount % 10 === 1) {
-    dbgLog(`frame called #${dbgFrameCount}`);
-  }
+  if (dbgFrameCount % 10 === 1) dbgLog(`tick #${dbgFrameCount}`);
 
-  const video = document.getElementById('qr-video');
-
-  // videoが準備できていない場合は次フレームへ
-  if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
-    if (dbgFrameCount % 10 === 1) {
-      dbgLog(`video未準備 readyState=${video ? video.readyState : 'null'} size=${video ? video.videoWidth+'x'+video.videoHeight : '-'}`);
-    }
-    requestAnimationFrame(scanFrame);
-    return;
-  }
-
-  // スロットル: SCAN_INTERVAL_MS より短い間隔はスキップ
-  if (timestamp - scannerLastScan < SCAN_INTERVAL_MS) {
-    requestAnimationFrame(scanFrame);
-    return;
-  }
-  scannerLastScan = timestamp;
-
-  // canvasを使い回す（iPhone Safariでの毎フレーム生成を避ける）
-  // 解像度は最大640pxにスケールダウン（処理速度向上）
-  const MAX_SIZE = 640;
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  const scale = Math.min(1, MAX_SIZE / Math.max(vw, vh));
-  const cw = Math.floor(vw * scale);
-  const ch = Math.floor(vh * scale);
-
-  if (!scannerCanvas) {
-    scannerCanvas = document.createElement('canvas');
-    // willReadFrequently: trueでiOS Safariのピクセル読み取りを高速化
-    scannerCtx = scannerCanvas.getContext('2d', { willReadFrequently: true });
-    dbgLog(`canvas初期化 ${cw}x${ch} (元映像${vw}x${vh})`);
-  }
-  if (scannerCanvas.width !== cw || scannerCanvas.height !== ch) {
-    scannerCanvas.width = cw;
-    scannerCanvas.height = ch;
-  }
-
-  // iPhoneの縦持ち時にvideoWidth < videoHeightになる（720x1280）。
-  // canvasに描画する際に回転を補正する。
-  const isPortrait = vw < vh;
-  if (isPortrait) {
-    // 縦持ち: canvasを横向きに設定し、90度回転して描画
-    if (scannerCanvas.width !== ch || scannerCanvas.height !== cw) {
-      scannerCanvas.width = ch;
-      scannerCanvas.height = cw;
-      dbgLog(`縦持ち補正: canvas=${ch}x${cw}`);
-    }
-    scannerCtx.save();
-    scannerCtx.translate(ch / 2, cw / 2);
-    scannerCtx.rotate(Math.PI / 2);
-    scannerCtx.drawImage(video, -cw / 2, -ch / 2, cw, ch);
-    scannerCtx.restore();
-  } else {
-    if (scannerCanvas.width !== cw || scannerCanvas.height !== ch) {
-      scannerCanvas.width = cw;
-      scannerCanvas.height = ch;
-    }
-    scannerCtx.drawImage(video, 0, 0, cw, ch);
-  }
-
-  // getImageData・jsQR を丸ごと try/catch で囲む
-  // （例外でループが止まらないよう finally で必ずRAFを継続）
   let detected = false;
   try {
-    const iw = isPortrait ? ch : cw;
-    const ih = isPortrait ? cw : ch;
-    const imageData = scannerCtx.getImageData(0, 0, iw, ih);
-
-    const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: 'attemptBoth',
-    });
-
-    // jsQR結果を50フレームに1回ログ（nullが延々続く場合の確認用）
-    if (dbgFrameCount % 50 === 1) {
-      dbgLog(`jsQR結果: ${code ? '検出! → '+code.data : 'null'} canvas=${iw}x${ih}`);
-    }
-
-    if (code && code.data) {
-      dbgLog(`QR検出成功: ${code.data}`);
-      detected = true;
-      stopScanner();
-      handleScannedLabel(code.data.trim().toUpperCase());
+    if (barcodeDetector) {
+      // ── ネイティブ BarcodeDetector（iOS17+）──
+      const barcodes = await barcodeDetector.detect(video);
+      if (dbgFrameCount % 20 === 1) dbgLog(`BarcodeDetector: ${barcodes.length}件検出`);
+      if (barcodes.length > 0) {
+        dbgLog(`QR検出! ${barcodes[0].rawValue}`);
+        detected = true;
+        stopScanner();
+        handleScannedLabel(barcodes[0].rawValue.trim().toUpperCase());
+      }
+    } else if (typeof jsQR !== 'undefined') {
+      // ── jsQR フォールバック ──
+      const MAX_SIZE = 640;
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const scale = Math.min(1, MAX_SIZE / Math.max(vw, vh));
+      const cw = Math.floor(vw * scale), ch = Math.floor(vh * scale);
+      const isPortrait = vw < vh;
+      if (!scannerCanvas) {
+        scannerCanvas = document.createElement('canvas');
+        scannerCtx = scannerCanvas.getContext('2d', { willReadFrequently: true });
+        dbgLog(`jsQR canvas初期化 ${cw}x${ch} portrait=${isPortrait}`);
+      }
+      if (isPortrait) {
+        scannerCanvas.width = ch; scannerCanvas.height = cw;
+        scannerCtx.save();
+        scannerCtx.translate(ch / 2, cw / 2);
+        scannerCtx.rotate(Math.PI / 2);
+        scannerCtx.drawImage(video, -cw / 2, -ch / 2, cw, ch);
+        scannerCtx.restore();
+      } else {
+        scannerCanvas.width = cw; scannerCanvas.height = ch;
+        scannerCtx.drawImage(video, 0, 0, cw, ch);
+      }
+      const iw = isPortrait ? ch : cw, ih = isPortrait ? cw : ch;
+      const imageData = scannerCtx.getImageData(0, 0, iw, ih);
+      const code = jsQR(imageData.data, iw, ih, { inversionAttempts: 'attemptBoth' });
+      if (dbgFrameCount % 20 === 1) dbgLog(`jsQR: ${code ? '検出! '+code.data : 'null'} ${iw}x${ih}`);
+      if (code && code.data) {
+        dbgLog(`QR検出! ${code.data}`);
+        detected = true;
+        stopScanner();
+        handleScannedLabel(code.data.trim().toUpperCase());
+      }
+    } else {
+      if (dbgFrameCount % 20 === 1) dbgLog('ERROR: スキャン手段なし（jsQR未ロード・BD未対応）');
     }
   } catch(e) {
-    dbgLog(`ERROR jsQR処理失敗: ${e.name}: ${e.message}`);
-  } finally {
-    // 検出済みでなければ必ずループを継続（例外時もここに来る）
-    if (!detected) requestAnimationFrame(scanFrame);
+    dbgLog(`ERROR scanTick: ${e.name}: ${e.message}`);
+  }
+
+  // 未検出かつアクティブならSCAN_INTERVAL_MS後に次のtick
+  if (!detected && scannerActive) {
+    setTimeout(() => scanTick(video), SCAN_INTERVAL_MS);
   }
 }
 
