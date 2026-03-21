@@ -1,0 +1,7 @@
+# Claude Code 一時ファイル
+*.tmp.*
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
