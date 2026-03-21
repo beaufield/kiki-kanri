@@ -618,7 +618,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.5.5';
+const APP_VERSION = '1.5.6';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -828,6 +828,7 @@ function render() {
     loanForm: renderLoanForm,
     returnForm: renderReturnForm,
     registerForm: renderRegisterForm,
+    editDevice: renderEditDevice,
     settings: renderSettings,
     salesReps: renderSalesReps,
     makers: renderMakers,
@@ -1186,6 +1187,9 @@ function renderDeviceDetail() {
         </div>
       </div>`).join('')}
     </div>` : ''}
+    <div style="margin-top:12px;">
+      <button class="btn" style="background:none;border:1px solid var(--border);color:var(--text-main);width:100%;" onclick="navigate('editDevice', {deviceId:${device.id}})">✏️ 商品情報を編集する</button>
+    </div>
   </div>`;
 }
 
@@ -1555,6 +1559,107 @@ async function submitRegister() {
     viewStack = [];
     navigate('deviceDetail', { deviceId: saved ? saved.id : newDevice.id });
   } catch(e) {
+  } finally {
+    hideLoading();
+  }
+}
+
+// ========== EDIT DEVICE ==========
+function renderEditDevice() {
+  const device = db.devices.find(d => d.id === viewData.deviceId);
+  if (!device) return '<div class="content"><p>商品が見つかりません</p></div>';
+  const isMaker = device.type === 'メーカー借入';
+  return `
+  <div class="header">
+    <div style="display:flex;gap:6px;"><button class="header-back" onclick="goBack()">← 戻る</button><button class="header-back" onclick="resetTo('home')">🏠</button></div>
+    <h1>商品情報を編集</h1>
+    <div></div>
+  </div>
+  <div class="content">
+    <div class="form-section">
+      <div class="form-label">LabelID（変更不可）</div>
+      <div style="padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;color:var(--text-sub);background:#f5f5f5;">${device.labelId}</div>
+    </div>
+    <div class="form-section">
+      <div class="form-label">ステータス（変更不可）</div>
+      <div style="padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;color:var(--text-sub);background:#f5f5f5;">${device.status}</div>
+    </div>
+    <div class="form-section">
+      <div class="form-label">商品名 <span class="required">*</span></div>
+      <input class="form-input" id="f-edit-name" value="${(device.name||'').replace(/"/g,'&quot;')}" autocomplete="off">
+    </div>
+    <div class="form-section">
+      <div class="form-label">区分 <span class="required">*</span></div>
+      <div class="form-radio-group">
+        <div class="radio-btn${!isMaker ? ' selected' : ''}" id="edit-type-own" onclick="selectTypeEdit('自社資産')">自社資産</div>
+        <div class="radio-btn${isMaker ? ' selected' : ''}" id="edit-type-maker" onclick="selectTypeEdit('メーカー借入')">メーカー借入</div>
+      </div>
+      <input type="hidden" id="f-edit-type" value="${device.type || '自社資産'}">
+    </div>
+    <div class="form-section">
+      <div class="form-label">メーカー名</div>
+      <select class="form-select" id="f-edit-maker">
+        <option value="">選択してください</option>
+        ${(db.makers||[]).filter(m => m.active).map(m => `<option value="${m.name}"${m.name === (device.maker||'') ? ' selected' : ''}>${m.name}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-section" id="edit-maker-due-section" style="${isMaker ? '' : 'display:none;'}">
+      <div class="form-label">メーカー返却期限 <span style="color:var(--text-sub);font-weight:400;">(未定の場合は空欄)</span></div>
+      <input class="form-input" id="f-edit-maker-due" type="date" value="${device.makerReturnDueDate || ''}">
+    </div>
+    <div class="form-section">
+      <div class="form-label">備考（付属品等）</div>
+      <input class="form-input" id="f-edit-notes" value="${(device.notes||'').replace(/"/g,'&quot;')}" placeholder="任意">
+    </div>
+    <div class="form-section">
+      <div class="form-label">画像</div>
+      <input type="file" id="f-img-edit" accept="image/*" style="display:none" onchange="handleImageSelect('edit', this)">
+      ${device.imageUrl ? `
+      <div style="margin-bottom:8px;">
+        <img src="${device.imageUrl}" style="max-width:100%;max-height:200px;border-radius:8px;object-fit:contain;display:block;" onerror="this.style.display='none'">
+        <div style="font-size:12px;color:var(--text-sub);margin-top:4px;">現在の画像</div>
+      </div>` : ''}
+      <div id="img-preview-edit" style="display:none;margin-bottom:8px;">
+        <img id="img-thumb-edit" style="max-width:100%;max-height:200px;border-radius:8px;object-fit:contain;display:block;">
+        <div style="font-size:12px;color:var(--text-sub);margin-top:4px;">新しい画像（差し替え後）</div>
+        <button class="btn" style="margin-top:6px;background:var(--danger);color:#fff;font-size:13px;padding:6px 14px;" onclick="clearImage('edit')">✕ キャンセル</button>
+      </div>
+      <button class="btn" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-main);" onclick="document.getElementById('f-img-edit').click()">📷 ${device.imageUrl ? '画像を差し替える' : '画像を追加'}</button>
+    </div>
+    <button class="btn btn-primary" onclick="submitEditDevice(${device.id})">保存する</button>
+  </div>`;
+}
+
+function selectTypeEdit(type) {
+  document.getElementById('f-edit-type').value = type;
+  document.getElementById('edit-type-own').className = 'radio-btn' + (type === '自社資産' ? ' selected' : '');
+  document.getElementById('edit-type-maker').className = 'radio-btn' + (type === 'メーカー借入' ? ' selected' : '');
+  document.getElementById('edit-maker-due-section').style.display = type === 'メーカー借入' ? '' : 'none';
+}
+
+async function submitEditDevice(deviceId) {
+  const name = document.getElementById('f-edit-name').value.trim();
+  const type = document.getElementById('f-edit-type').value;
+  const maker = document.getElementById('f-edit-maker').value;
+  const makerDue = document.getElementById('f-edit-maker-due').value;
+  const notes = document.getElementById('f-edit-notes').value.trim();
+  if (!name) { showToast('商品名を入力してください', 'error'); return; }
+  const device = db.devices.find(d => d.id === deviceId);
+  device.name = name;
+  device.type = type;
+  device.maker = maker;
+  device.makerReturnDueDate = makerDue || null;
+  device.notes = notes;
+  showLoading();
+  try {
+    const imageUrl = await uploadPendingImage('edit');
+    if (imageUrl) device.imageUrl = imageUrl;
+    pendingImages['edit'] = null;
+    await apiPost('saveDevice', device);
+    showToast('更新しました ✓', 'success');
+    goBack();
+  } catch(e) {
+    showToast('エラーが発生しました', 'error');
   } finally {
     hideLoading();
   }
