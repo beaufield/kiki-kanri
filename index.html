@@ -618,7 +618,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.5.7';
+const APP_VERSION = '1.5.8';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -1432,10 +1432,12 @@ function renderRegisterForm() {
     </div>
     <div class="form-section">
       <div class="form-label">メーカー名</div>
-      <select class="form-select" id="f-maker">
+      <select class="form-select" id="f-maker" onchange="onMakerSelectChange('f-maker','f-maker-new')">
         <option value="">選択してください</option>
         ${(db.makers||[]).filter(m => m.active).map(m => `<option value="${m.name}">${m.name}</option>`).join('')}
+        <option value="__new__">＋ 新しいメーカーを追加...</option>
       </select>
+      <input class="form-input" id="f-maker-new" placeholder="メーカー名を入力" style="display:none;margin-top:8px;">
     </div>
     <div class="form-section" id="maker-due-section" style="display:none;">
       <div class="form-label">メーカー返却期限 <span style="color:var(--text-sub);font-weight:400;">(未定の場合は空欄)</span></div>
@@ -1511,11 +1513,38 @@ function selectType(type) {
   document.getElementById('maker-due-section').style.display = type === 'メーカー借入' ? '' : 'none';
 }
 
+function onMakerSelectChange(selectId, inputId) {
+  const sel = document.getElementById(selectId);
+  const inp = document.getElementById(inputId);
+  if (sel.value === '__new__') {
+    inp.style.display = '';
+    inp.focus();
+  } else {
+    inp.style.display = 'none';
+    inp.value = '';
+  }
+}
+
+// 新規メーカーをMakerMasterに保存して名前を返す。既存なら何もしない。
+async function saveNewMakerIfNeeded(selectId, inputId) {
+  const sel = document.getElementById(selectId);
+  if (sel.value !== '__new__') return sel.value.trim();
+  const name = document.getElementById(inputId).value.trim();
+  if (!name) return '';
+  if (!db.makers) db.makers = [];
+  // 同名が既にあれば追加しない
+  if (!db.makers.find(m => m.name === name)) {
+    const newMaker = { id: db.nextMakerId++, name, active: true };
+    db.makers.push(newMaker);
+    await apiPost('saveMaker', newMaker);
+  }
+  return name;
+}
+
 async function submitRegister() {
   const labelId = document.getElementById('f-labelid').value.trim().toUpperCase();
   const name = document.getElementById('f-name').value.trim();
   const type = document.getElementById('f-type').value;
-  const maker = document.getElementById('f-maker').value.trim();
   const makerDue = document.getElementById('f-maker-due').value;
   const notes = document.getElementById('f-notes').value.trim();
 
@@ -1525,26 +1554,28 @@ async function submitRegister() {
     showToast('このLabelIDはすでに使用されています', 'error'); return;
   }
 
-  const newDevice = {
-    id: db.nextDeviceId++,
-    labelId,
-    name,
-    type,
-    maker,
-    status: '社内',
-    loanTo: null,
-    loanDate: null,
-    returnDueDate: null,
-    returnDate: null,
-    salesRep: null,
-    notes,
-    makerReturnDueDate: makerDue || null,
-    createdAt: today(),
-  };
-
-  db.devices.push(newDevice);
   showLoading();
   try {
+    const maker = await saveNewMakerIfNeeded('f-maker', 'f-maker-new');
+
+    const newDevice = {
+      id: db.nextDeviceId++,
+      labelId,
+      name,
+      type,
+      maker,
+      status: '社内',
+      loanTo: null,
+      loanDate: null,
+      returnDueDate: null,
+      returnDate: null,
+      salesRep: null,
+      notes,
+      makerReturnDueDate: makerDue || null,
+      createdAt: today(),
+    };
+
+    db.devices.push(newDevice);
     const imageUrl = await uploadPendingImage('reg');
     if (imageUrl) newDevice.imageUrl = imageUrl;
     await apiPost('saveDevice', newDevice);
@@ -1598,10 +1629,12 @@ function renderEditDevice() {
     </div>
     <div class="form-section">
       <div class="form-label">メーカー名</div>
-      <select class="form-select" id="f-edit-maker">
+      <select class="form-select" id="f-edit-maker" onchange="onMakerSelectChange('f-edit-maker','f-edit-maker-new')">
         <option value="">選択してください</option>
         ${(db.makers||[]).filter(m => m.active).map(m => `<option value="${m.name}"${m.name === (device.maker||'') ? ' selected' : ''}>${m.name}</option>`).join('')}
+        <option value="__new__">＋ 新しいメーカーを追加...</option>
       </select>
+      <input class="form-input" id="f-edit-maker-new" placeholder="メーカー名を入力" style="display:none;margin-top:8px;">
     </div>
     <div class="form-section" id="edit-maker-due-section" style="${isMaker ? '' : 'display:none;'}">
       <div class="form-label">メーカー返却期限 <span style="color:var(--text-sub);font-weight:400;">(未定の場合は空欄)</span></div>
@@ -1640,18 +1673,18 @@ function selectTypeEdit(type) {
 async function submitEditDevice(deviceId) {
   const name = document.getElementById('f-edit-name').value.trim();
   const type = document.getElementById('f-edit-type').value;
-  const maker = document.getElementById('f-edit-maker').value;
   const makerDue = document.getElementById('f-edit-maker-due').value;
   const notes = document.getElementById('f-edit-notes').value.trim();
   if (!name) { showToast('商品名を入力してください', 'error'); return; }
   const device = db.devices.find(d => d.id === deviceId);
-  device.name = name;
-  device.type = type;
-  device.maker = maker;
-  device.makerReturnDueDate = makerDue || null;
-  device.notes = notes;
   showLoading();
   try {
+    const maker = await saveNewMakerIfNeeded('f-edit-maker', 'f-edit-maker-new');
+    device.name = name;
+    device.type = type;
+    device.maker = maker;
+    device.makerReturnDueDate = makerDue || null;
+    device.notes = notes;
     const imageUrl = await uploadPendingImage('edit');
     if (imageUrl) device.imageUrl = imageUrl;
     pendingImages['edit'] = null;
