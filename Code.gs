@@ -1,10 +1,10 @@
 // ============================================================
 // ビューフィールド 貸出管理アプリ — バックエンド
-// VERSION: GAS 1.5.0
-// 更新日: 2026-03-19
+// VERSION: GAS 1.5.1
+// 更新日: 2026-03-26
 // ============================================================
 
-const VERSION = 'GAS 1.5.0';
+const VERSION = 'GAS 1.5.1';
 const SHEET_ID = '1o12RSbRWmNsiEjVPCb2dIjyw4U4Ntn47-6Lc80E_jvk';
 const LINEWORKS_WEBHOOK_URL = 'https://webhook.worksmobile.com/message/bf4bbf8b-e26f-4760-b2f2-5ea20b4cc025';
 const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -16,16 +16,18 @@ function doPost(e) {
     const data = JSON.parse(e.parameter.data);
     let result;
 
-    if      (action === 'saveDevice')         result = saveDevice(data);
-    else if (action === 'saveLoan')           result = saveLoan(data);
-    else if (action === 'saveSalesRep')       result = saveSalesRep(data);
-    else if (action === 'deleteSalesRep')     result = deleteSalesRep(data.id);
-    else if (action === 'uploadImage')        result = uploadImage(data);
-    else if (action === 'saveMaker')          result = saveMaker(data);
-    else if (action === 'deleteMaker')        result = deleteMaker(data.id);
-    else if (action === 'issueLabel')         result = issueLabel(data);
-    else if (action === 'updatePrintStatus')  result = updatePrintStatus(data);
-    else if (action === 'assignLabel')        result = assignLabel(data);
+    if      (action === 'saveDevice')          result = saveDevice(data);
+    else if (action === 'saveLoan')            result = saveLoan(data);
+    else if (action === 'registerDevice')      result = registerDevice(data);
+    else if (action === 'saveLoanTransaction') result = saveLoanTransaction(data);
+    else if (action === 'saveSalesRep')        result = saveSalesRep(data);
+    else if (action === 'deleteSalesRep')      result = deleteSalesRep(data.id);
+    else if (action === 'uploadImage')         result = uploadImage(data);
+    else if (action === 'saveMaker')           result = saveMaker(data);
+    else if (action === 'deleteMaker')         result = deleteMaker(data.id);
+    else if (action === 'issueLabel')          result = issueLabel(data);
+    else if (action === 'updatePrintStatus')   result = updatePrintStatus(data);
+    else if (action === 'assignLabel')         result = assignLabel(data);
     else result = { error: 'Unknown action: ' + action };
 
     return ContentService
@@ -67,6 +69,26 @@ function getSheet(name) {
     headers.forEach((h, i) => obj[h] = row[i]);
     return obj;
   });
+}
+
+// ─── 商品登録トランザクション（saveDevice + assignLabel を1回で処理） ─
+// フロントエンドから1回のリクエストで完結させ、通信往復を削減する
+function registerDevice(data) {
+  const savedResult = saveDevice(data.device);
+  const savedDevice = savedResult.device;
+  if (data.labelId) {
+    assignLabel({ labelId: data.labelId, deviceId: savedDevice.id });
+    savedDevice.labelId = data.labelId; // labelIdを確実に返す
+  }
+  return { success: true, device: savedDevice };
+}
+
+// ─── 貸出/返却トランザクション（saveDevice + saveLoan を1回で処理） ─
+// フロントエンドから1回のリクエストで完結させ、通信往復を削減する
+function saveLoanTransaction(data) {
+  saveDevice(data.device);
+  saveLoan(data.loan);
+  return { success: true };
 }
 
 // ─── 商品マスタ保存 ──────────────────────────────────────────
