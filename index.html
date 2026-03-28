@@ -618,7 +618,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.5.9';
+const APP_VERSION = '1.6.0';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -802,7 +802,8 @@ function showToast(msg, type = '') {
 let currentView = 'home';
 let viewStack = [];
 let viewData = {};
-let pendingImages = {}; // { reg: {base64,mimeType,fileName} | null, loan: ... }
+let pendingImages = {}; // { reg: [img0,img1,img2], loan: img, edit: [img0,img1,img2] }
+let clearedSlots  = {}; // edit用: { 0:true, 1:true, 2:true } 削除済みスロット追跡
 
 function navigate(view, data = {}) {
   viewStack.push({ view: currentView, data: viewData });
@@ -1169,7 +1170,7 @@ function renderDeviceDetail() {
         <span class="detail-hero-badge">${device.type}</span>
         ${device.maker ? `<span class="detail-hero-badge">${device.maker}</span>` : ''}
       </div>
-      ${device.imageUrl ? `<a href="${device.imageUrl}" target="_blank" rel="noopener" style="display:inline-block;margin-top:12px;padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;font-size:14px;color:var(--text-main);text-decoration:none;">📷 画像を見る</a>` : ''}
+      ${[device.imageUrl, device.imageUrl2, device.imageUrl3].filter(Boolean).map((url, i) => `<a href="${url}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;margin-right:6px;padding:8px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;font-size:14px;color:var(--text-main);text-decoration:none;">📷 画像${i+1}</a>`).join('')}
     </div>
 
     ${device.status === '貸出中' ? `
@@ -1462,20 +1463,34 @@ function renderRegisterForm() {
       <input class="form-input" id="f-notes" placeholder="任意">
     </div>
     <div class="form-section">
-      <div class="form-label">画像 <span style="color:var(--text-sub);font-weight:400;">(任意)</span></div>
-      <input type="file" id="f-img-reg" accept="image/*" style="display:none" onchange="handleImageSelect('reg', this)">
-      <div id="img-preview-reg" style="display:none;margin-bottom:8px;">
-        <img id="img-thumb-reg" style="max-width:100%;max-height:200px;border-radius:8px;object-fit:contain;display:block;">
-        <button class="btn" style="margin-top:6px;background:var(--danger);color:#fff;font-size:13px;padding:6px 14px;" onclick="clearImage('reg')">✕ 削除</button>
-      </div>
-      <button class="btn" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-main);" onclick="document.getElementById('f-img-reg').click()">📷 画像を追加</button>
+      <div class="form-label">画像 <span style="color:var(--text-sub);font-weight:400;">(任意・最大3枚)</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">${renderImageSlots('reg', [])}</div>
     </div>
     <button class="btn btn-primary" onclick="submitRegister()">商品を登録する</button>
   </div>`;
 }
 
 // ========== IMAGE UPLOAD ==========
-function handleImageSelect(type, input) {
+
+// 3枚スロットのHTML生成（reg/edit共通）
+// existingUrls: [url0, url1, url2] 既存画像URL（nullは空スロット）
+function renderImageSlots(type, existingUrls) {
+  const urls = existingUrls || [];
+  let html = '';
+  for (let i = 0; i < 3; i++) {
+    const ex = urls[i] || null;
+    html += `
+      <input type="file" id="f-img-${type}-${i}" accept="image/*" style="display:none" onchange="handleImageSelect('${type}', this, ${i})">
+      <div style="width:88px;height:88px;border:1.5px dashed var(--border);border-radius:10px;position:relative;overflow:hidden;background:var(--bg-card);cursor:pointer;flex-shrink:0;" onclick="document.getElementById('f-img-${type}-${i}').click()">
+        <img id="img-thumb-${type}-${i}" src="${ex || ''}" style="width:100%;height:100%;object-fit:cover;border-radius:9px;${ex ? '' : 'display:none;'}">
+        <div id="img-label-${type}-${i}" style="${ex ? 'display:none;' : ''}position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;color:var(--text-sub);gap:2px;pointer-events:none;"><span style="font-size:20px;">📷</span><span>${i + 1}枚目</span></div>
+        <button id="img-del-${type}-${i}" style="display:${ex ? '' : 'none'};position:absolute;top:3px;right:3px;background:rgba(220,38,38,0.85);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font-size:11px;cursor:pointer;padding:0;line-height:1;" onclick="event.stopPropagation();clearImage('${type}',${i})">✕</button>
+      </div>`;
+  }
+  return html;
+}
+
+function handleImageSelect(type, input, index) {
   const file = input.files[0];
   if (!file) { console.log('[IMAGE] ファイル未選択'); return; }
   console.log('[IMAGE] ファイル選択:', file.name, file.type, file.size, 'bytes');
@@ -1483,27 +1498,56 @@ function handleImageSelect(type, input) {
   reader.onload = function(e) {
     const dataUrl = e.target.result;
     const base64 = dataUrl.split(',')[1];
-    pendingImages[type] = { base64, mimeType: file.type || 'image/jpeg', fileName: file.name || 'upload.jpg' };
-    console.log('[IMAGE] base64変換成功 type=' + type + ' mimeType=' + pendingImages[type].mimeType + ' base64length=' + base64.length);
-    const thumb = document.getElementById('img-thumb-' + type);
-    const preview = document.getElementById('img-preview-' + type);
-    if (thumb) thumb.src = dataUrl;
-    if (preview) preview.style.display = '';
+    if (index !== undefined) {
+      // 複数画像モード（reg / edit）
+      if (!Array.isArray(pendingImages[type])) pendingImages[type] = [null, null, null];
+      pendingImages[type][index] = { base64, mimeType: file.type || 'image/jpeg', fileName: file.name || 'upload.jpg' };
+      if (clearedSlots[type]) delete clearedSlots[type][index];
+      const thumb  = document.getElementById('img-thumb-'  + type + '-' + index);
+      const label  = document.getElementById('img-label-'  + type + '-' + index);
+      const delBtn = document.getElementById('img-del-'    + type + '-' + index);
+      if (thumb)  { thumb.src = dataUrl; thumb.style.display = ''; }
+      if (label)  label.style.display = 'none';
+      if (delBtn) delBtn.style.display = '';
+    } else {
+      // 単一画像モード（loan）
+      pendingImages[type] = { base64, mimeType: file.type || 'image/jpeg', fileName: file.name || 'upload.jpg' };
+      console.log('[IMAGE] base64変換成功 type=' + type + ' base64length=' + base64.length);
+      const thumb   = document.getElementById('img-thumb-'   + type);
+      const preview = document.getElementById('img-preview-' + type);
+      if (thumb)   thumb.src = dataUrl;
+      if (preview) preview.style.display = '';
+    }
   };
-  reader.onerror = function(err) {
-    console.error('[IMAGE] FileReader エラー:', err);
-  };
+  reader.onerror = function(err) { console.error('[IMAGE] FileReader エラー:', err); };
   reader.readAsDataURL(file);
 }
 
-function clearImage(type) {
-  pendingImages[type] = null;
-  const input = document.getElementById('f-img-' + type);
-  const preview = document.getElementById('img-preview-' + type);
-  if (input) input.value = '';
-  if (preview) preview.style.display = 'none';
+function clearImage(type, index) {
+  if (index !== undefined) {
+    // 複数画像モード（reg / edit）
+    if (Array.isArray(pendingImages[type])) pendingImages[type][index] = null;
+    if (!clearedSlots[type]) clearedSlots[type] = {};
+    clearedSlots[type][index] = true;
+    const input  = document.getElementById('f-img-'   + type + '-' + index);
+    const thumb  = document.getElementById('img-thumb-' + type + '-' + index);
+    const label  = document.getElementById('img-label-' + type + '-' + index);
+    const delBtn = document.getElementById('img-del-'   + type + '-' + index);
+    if (input)  input.value = '';
+    if (thumb)  { thumb.src = ''; thumb.style.display = 'none'; }
+    if (label)  label.style.display = '';
+    if (delBtn) delBtn.style.display = 'none';
+  } else {
+    // 単一画像モード（loan）
+    pendingImages[type] = null;
+    const input   = document.getElementById('f-img-'     + type);
+    const preview = document.getElementById('img-preview-' + type);
+    if (input)   input.value = '';
+    if (preview) preview.style.display = 'none';
+  }
 }
 
+// 単一画像アップロード（loanフォーム用）
 async function uploadPendingImage(type) {
   const img = pendingImages[type];
   if (!img) { console.log('[IMAGE] アップロードスキップ（画像なし） type=' + type); return null; }
@@ -1518,6 +1562,25 @@ async function uploadPendingImage(type) {
     console.error('[IMAGE] アップロードエラー:', e.message);
     throw e;
   }
+}
+
+// 複数画像アップロード（reg / editフォーム用）最大3枚
+async function uploadPendingImages(type) {
+  const slots = Array.isArray(pendingImages[type]) ? pendingImages[type] : [null, null, null];
+  const results = [];
+  for (let i = 0; i < 3; i++) {
+    const img = slots[i];
+    if (!img) { results.push(null); continue; }
+    try {
+      const res = await apiPost('uploadImage', img);
+      const url = (res && res.result && res.result.imageUrl) ? res.result.imageUrl : null;
+      results.push(url);
+    } catch(e) {
+      console.error('[IMAGE] アップロードエラー slot=' + i, e.message);
+      results.push(null);
+    }
+  }
+  return results;
 }
 
 function selectType(type) {
@@ -1581,14 +1644,16 @@ async function submitRegister() {
       createdAt: today(),
     };
 
-    const imageUrl = await uploadPendingImage('reg');
-    if (imageUrl) newDevice.imageUrl = imageUrl;
+    const imageUrls = await uploadPendingImages('reg');
+    if (imageUrls[0]) newDevice.imageUrl  = imageUrls[0];
+    if (imageUrls[1]) newDevice.imageUrl2 = imageUrls[1];
+    if (imageUrls[2]) newDevice.imageUrl3 = imageUrls[2];
 
     // saveDevice + assignLabel を1回のGASコールで処理（通信往復を削減）
     const result = await apiPost('registerDevice', { device: newDevice, labelId });
     const serverDevice = result?.result?.device || newDevice;
     db.devices.push(serverDevice);
-    pendingImages['reg'] = null;
+    pendingImages['reg'] = [null, null, null];
     saveDBCache();
     showToast('商品を登録しました ✓', 'success');
     currentView = 'home';
@@ -1605,6 +1670,9 @@ async function submitRegister() {
 function renderEditDevice() {
   const device = db.devices.find(d => d.id === viewData.deviceId);
   if (!device) return '<div class="content"><p>商品が見つかりません</p></div>';
+  // 編集フォーム表示時に画像スロット状態をリセット
+  pendingImages['edit'] = [null, null, null];
+  clearedSlots['edit'] = {};
   const isMaker = device.type === 'メーカー借入';
   return `
   <div class="header">
@@ -1651,19 +1719,8 @@ function renderEditDevice() {
       <input class="form-input" id="f-edit-notes" value="${(device.notes||'').replace(/"/g,'&quot;')}" placeholder="任意">
     </div>
     <div class="form-section">
-      <div class="form-label">画像</div>
-      <input type="file" id="f-img-edit" accept="image/*" style="display:none" onchange="handleImageSelect('edit', this)">
-      ${device.imageUrl ? `
-      <div style="margin-bottom:8px;">
-        <img src="${device.imageUrl}" style="max-width:100%;max-height:200px;border-radius:8px;object-fit:contain;display:block;" onerror="this.style.display='none'">
-        <div style="font-size:12px;color:var(--text-sub);margin-top:4px;">現在の画像</div>
-      </div>` : ''}
-      <div id="img-preview-edit" style="display:none;margin-bottom:8px;">
-        <img id="img-thumb-edit" style="max-width:100%;max-height:200px;border-radius:8px;object-fit:contain;display:block;">
-        <div style="font-size:12px;color:var(--text-sub);margin-top:4px;">新しい画像（差し替え後）</div>
-        <button class="btn" style="margin-top:6px;background:var(--danger);color:#fff;font-size:13px;padding:6px 14px;" onclick="clearImage('edit')">✕ キャンセル</button>
-      </div>
-      <button class="btn" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-main);" onclick="document.getElementById('f-img-edit').click()">📷 ${device.imageUrl ? '画像を差し替える' : '画像を追加'}</button>
+      <div class="form-label">画像 <span style="color:var(--text-sub);font-weight:400;">(最大3枚)</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">${renderImageSlots('edit', [device.imageUrl||null, device.imageUrl2||null, device.imageUrl3||null])}</div>
     </div>
     <button class="btn btn-primary" onclick="submitEditDevice(${device.id})">保存する</button>
   </div>`;
@@ -1691,9 +1748,15 @@ async function submitEditDevice(deviceId) {
     device.maker = maker;
     device.makerReturnDueDate = makerDue || null;
     device.notes = notes;
-    const imageUrl = await uploadPendingImage('edit');
-    if (imageUrl) device.imageUrl = imageUrl;
-    pendingImages['edit'] = null;
+    const imageUrls = await uploadPendingImages('edit');
+    const urlKeys = ['imageUrl', 'imageUrl2', 'imageUrl3'];
+    const cleared  = clearedSlots['edit'] || {};
+    urlKeys.forEach((key, i) => {
+      if (imageUrls[i])   device[key] = imageUrls[i];
+      else if (cleared[i]) device[key] = null;
+    });
+    pendingImages['edit'] = [null, null, null];
+    clearedSlots['edit']  = {};
     await apiPost('saveDevice', device);
     showToast('更新しました ✓', 'success');
     goBack();
