@@ -1,10 +1,10 @@
 // ============================================================
 // ビューフィールド 貸出管理アプリ — バックエンド
-// VERSION: GAS 1.5.1
+// VERSION: GAS 1.5.2
 // 更新日: 2026-03-26
 // ============================================================
 
-const VERSION = 'GAS 1.5.1';
+const VERSION = 'GAS 1.5.2';
 const SHEET_ID = '1o12RSbRWmNsiEjVPCb2dIjyw4U4Ntn47-6Lc80E_jvk';
 const LINEWORKS_WEBHOOK_URL = 'https://webhook.worksmobile.com/message/bf4bbf8b-e26f-4760-b2f2-5ea20b4cc025';
 const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -349,24 +349,63 @@ function sendLineWorksMessage(text) {
 }
 
 // ─── 週次レポート（毎週火曜9:00にトリガー登録） ─────────────
-// 返却期限未設定の貸出中商品をLINE WORKSに通知する
+// ① 返却期限超過 ② 7日以内に期限 ③ 返却期限未設定 をLINE WORKSに通知する
 function sendWeeklyReport() {
   const devices = getSheet('DeviceMaster');
-  const targets = devices.filter(function(d) {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const limit = new Date(todayStr);
+  limit.setDate(limit.getDate() + 7);
+  const limitStr = limit.toISOString().split('T')[0];
+
+  // ① 期限超過（返却期限が今日以前）
+  const overdue = devices.filter(function(d) {
+    return d.status === '貸出中' && d.returnDueDate && d.returnDueDate < todayStr;
+  }).sort(function(a, b) { return a.returnDueDate.localeCompare(b.returnDueDate); });
+
+  // ② 7日以内に期限（今日より後〜7日以内）
+  const soon = devices.filter(function(d) {
+    return d.status === '貸出中' && d.returnDueDate && d.returnDueDate >= todayStr && d.returnDueDate <= limitStr;
+  }).sort(function(a, b) { return a.returnDueDate.localeCompare(b.returnDueDate); });
+
+  // ③ 返却期限未設定
+  const noDate = devices.filter(function(d) {
     return d.status === '貸出中' && !d.returnDueDate;
   });
 
-  if (targets.length === 0) {
-    sendLineWorksMessage('【週次レポート】返却期限未設定の貸出中商品はありません。');
+  // すべて該当なしなら簡易通知
+  if (overdue.length === 0 && soon.length === 0 && noDate.length === 0) {
+    sendLineWorksMessage('【週次レポート】要確認の貸出商品はありません。');
     return;
   }
 
-  let msg = '【週次レポート】返却期限未設定の貸出中商品（' + targets.length + '点）';
-  targets.forEach(function(d, i) {
-    msg += '\n\n' + (i + 1) + '. [' + (d.labelId || d.id) + '] ' + d.name;
-    msg += '\n　貸出先: ' + (d.loanTo || '未設定');
-    if (d.salesRep) msg += '\n　営業担当: ' + d.salesRep;
-  });
+  var msg = '【週次レポート】貸出状況確認（' + todayStr + '）';
+
+  if (overdue.length > 0) {
+    msg += '\n\n■ 返却期限超過（' + overdue.length + '件）';
+    overdue.forEach(function(d, i) {
+      msg += '\n' + (i + 1) + '. [' + (d.labelId || d.id) + '] ' + d.name;
+      msg += '\n　貸出先: ' + (d.loanTo || '未設定') + ' / 期限: ' + d.returnDueDate;
+      if (d.salesRep) msg += ' / ' + d.salesRep;
+    });
+  }
+
+  if (soon.length > 0) {
+    msg += '\n\n■ もうすぐ期限・7日以内（' + soon.length + '件）';
+    soon.forEach(function(d, i) {
+      msg += '\n' + (i + 1) + '. [' + (d.labelId || d.id) + '] ' + d.name;
+      msg += '\n　貸出先: ' + (d.loanTo || '未設定') + ' / 期限: ' + d.returnDueDate;
+      if (d.salesRep) msg += ' / ' + d.salesRep;
+    });
+  }
+
+  if (noDate.length > 0) {
+    msg += '\n\n■ 返却期限未設定（' + noDate.length + '件）';
+    noDate.forEach(function(d, i) {
+      msg += '\n' + (i + 1) + '. [' + (d.labelId || d.id) + '] ' + d.name;
+      msg += '\n　貸出先: ' + (d.loanTo || '未設定');
+      if (d.salesRep) msg += ' / ' + d.salesRep;
+    });
+  }
 
   sendLineWorksMessage(msg);
 }
