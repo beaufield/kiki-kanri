@@ -542,10 +542,11 @@
     margin-bottom: 12px;
     display: flex;
     gap: 10px;
-    align-items: flex-start;
+    align-items: center;
+    cursor: pointer;
   }
-  .overdue-banner svg { color: var(--danger); flex-shrink: 0; margin-top: 1px; }
-  .overdue-banner-text { font-size: 13px; color: #9b1c1c; font-weight: 500; }
+  .overdue-banner svg { color: var(--danger); flex-shrink: 0; }
+  .overdue-banner-text { font-size: 13px; color: #9b1c1c; font-weight: 500; flex: 1; }
   .warning-banner {
     background: #fffbeb;
     border: 1px solid #f6d860;
@@ -554,10 +555,11 @@
     margin-bottom: 12px;
     display: flex;
     gap: 10px;
-    align-items: flex-start;
+    align-items: center;
+    cursor: pointer;
   }
-  .warning-banner svg { color: var(--warning); flex-shrink: 0; margin-top: 1px; }
-  .warning-banner-text { font-size: 13px; color: #92400e; font-weight: 500; }
+  .warning-banner svg { color: var(--warning); flex-shrink: 0; }
+  .warning-banner-text { font-size: 13px; color: #92400e; font-weight: 500; flex: 1; }
 
   .loading-overlay {
     position: fixed;
@@ -618,7 +620,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.6.1';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -918,14 +920,16 @@ function renderHome() {
     </div>
 
     ${overdueDevices.length > 0 ? `
-    <div class="overdue-banner">
+    <div class="overdue-banner" onclick="navigate('devices', {filter:'overdue'})">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <div class="overdue-banner-text">返却期限を超過している商品が ${overdueDevices.length} 件あります</div>
+      <span style="color:#9b1c1c;font-size:18px;">›</span>
     </div>` : ''}
     ${soonDevices.length > 0 ? `
-    <div class="warning-banner">
+    <div class="warning-banner" onclick="navigate('devices', {filter:'soon'})">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <div class="warning-banner-text">返却期限が3日以内の商品が ${soonDevices.length} 件あります</div>
+      <span style="color:#92400e;font-size:18px;">›</span>
     </div>` : ''}
 
     <div class="quick-actions">
@@ -981,9 +985,28 @@ function renderDevices() {
   const activeDevices = db.devices.filter(d => d.status !== '廃棄' && d.status !== 'メーカー返却済');
 
   let devices = [...activeDevices];
-  if (filter === 'loan') devices = devices.filter(d => d.status === '貸出中');
+  if (filter === 'loan') {
+    devices = devices.filter(d => d.status === '貸出中');
+    // 返却期限が近い順（未設定は末尾）
+    devices.sort((a, b) => {
+      if (!a.returnDueDate && !b.returnDueDate) return 0;
+      if (!a.returnDueDate) return 1;
+      if (!b.returnDueDate) return -1;
+      return a.returnDueDate.localeCompare(b.returnDueDate);
+    });
+  }
   if (filter === 'in') devices = devices.filter(d => d.status === '社内');
-  if (filter === 'overdue') devices = devices.filter(d => isOverdue(d));
+  if (filter === 'overdue') {
+    devices = devices.filter(d => isOverdue(d));
+    devices.sort((a, b) => (a.returnDueDate||'').localeCompare(b.returnDueDate||''));
+  }
+  if (filter === 'soon') {
+    const todayStr2 = today();
+    const lim = new Date(todayStr2); lim.setDate(lim.getDate() + 3);
+    const limStr = lim.toISOString().split('T')[0];
+    devices = devices.filter(d => d.status === '貸出中' && d.returnDueDate && d.returnDueDate > todayStr2 && d.returnDueDate <= limStr);
+    devices.sort((a, b) => a.returnDueDate.localeCompare(b.returnDueDate));
+  }
   if (filter === 'nodate') devices = devices.filter(d => d.status === '貸出中' && !d.returnDueDate);
   if (filter === 'maker') devices = devices.filter(d => d.type === 'メーカー借入' && d.status === '貸出中');
   if (filter === 'byMaker') {
@@ -1014,6 +1037,7 @@ function renderDevices() {
       <button class="filter-tab ${filter==='all'?'active':''}" onclick="viewData.filter='all';viewData.makerFilter='';render()">すべて(${activeDevices.length})</button>
       <button class="filter-tab ${filter==='loan'?'active':''}" onclick="viewData.filter='loan';viewData.makerFilter='';render()">貸出中</button>
       <button class="filter-tab ${filter==='overdue'?'active':''}" onclick="viewData.filter='overdue';viewData.makerFilter='';render()">期限超過</button>
+      <button class="filter-tab ${filter==='soon'?'active':''}" onclick="viewData.filter='soon';viewData.makerFilter='';render()">もうすぐ期限</button>
       <button class="filter-tab ${filter==='nodate'?'active':''}" onclick="viewData.filter='nodate';viewData.makerFilter='';render()">返却日未定</button>
       <button class="filter-tab ${filter==='maker'?'active':''}" onclick="viewData.filter='maker';viewData.makerFilter='';render()">メーカー借入</button>
       <button class="filter-tab ${filter==='in'?'active':''}" onclick="viewData.filter='in';viewData.makerFilter='';render()">社内</button>
