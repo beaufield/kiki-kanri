@@ -1,12 +1,16 @@
 // ============================================================
 // ビューフィールド 貸出管理アプリ — バックエンド
-// VERSION: GAS 1.5.1
+// VERSION: GAS 1.7.0
 // 更新日: 2026-03-26
 // ============================================================
 
-const VERSION = 'GAS 1.5.1';
-const SHEET_ID = '1o12RSbRWmNsiEjVPCb2dIjyw4U4Ntn47-6Lc80E_jvk';
+const VERSION   = 'GAS 1.7.0';
+const SHEET_ID  = '1o12RSbRWmNsiEjVPCb2dIjyw4U4Ntn47-6Lc80E_jvk';
 const LINEWORKS_WEBHOOK_URL = 'https://webhook.worksmobile.com/message/bf4bbf8b-e26f-4760-b2f2-5ea20b4cc025';
+
+// beaufield-auth 共通認証設定
+const AUTH_SHEET_ID = '1cCQn16ubEN_Af7XWw8KerBscZtFomBnXHjIIiZUr6V8';
+const APP_NAME      = 'lending';
 const ss = SpreadsheetApp.openById(SHEET_ID);
 
 // ─── エントリーポイント（POST） ───────────────────────────────
@@ -28,6 +32,9 @@ function doPost(e) {
     else if (action === 'issueLabel')          result = issueLabel(data);
     else if (action === 'updatePrintStatus')   result = updatePrintStatus(data);
     else if (action === 'assignLabel')         result = assignLabel(data);
+    else if (action === 'login')               result = login(data);
+    else if (action === 'getAuthUsers')        result = getAuthUsers();
+    else if (action === 'changePin')           result = changePin(data);
     else result = { error: 'Unknown action: ' + action };
 
     return ContentService
@@ -349,26 +356,168 @@ function sendLineWorksMessage(text) {
 }
 
 // ─── 週次レポート（毎週火曜9:00にトリガー登録） ─────────────
-// 返却期限未設定の貸出中商品をLINE WORKSに通知する
+// ① 返却期限超過 ② 7日以内に期限 ③ 返却期限未設定 をLINE WORKSに通知する
 function sendWeeklyReport() {
   const devices = getSheet('DeviceMaster');
-  const targets = devices.filter(function(d) {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const limit = new Date(todayStr);
+  limit.setDate(limit.getDate() + 7);
+  const limitStr = limit.toISOString().split('T')[0];
+
+  // ① 期限超過（返却期限が今日以前）
+  const overdue = devices.filter(function(d) {
+    return d.status === '貸出中' && d.returnDueDate && d.returnDueDate < todayStr;
+  }).sort(function(a, b) { return a.returnDueDate.localeCompare(b.returnDueDate); });
+
+  // ② 7日以内に期限（今日より後〜7日以内）
+  const soon = devices.filter(function(d) {
+    return d.status === '貸出中' && d.returnDueDate && d.returnDueDate >= todayStr && d.returnDueDate <= limitStr;
+  }).sort(function(a, b) { return a.returnDueDate.localeCompare(b.returnDueDate); });
+
+  // ③ 返却期限未設定
+  const noDate = devices.filter(function(d) {
     return d.status === '貸出中' && !d.returnDueDate;
   });
 
-  if (targets.length === 0) {
-    sendLineWorksMessage('【週次レポート】返却期限未設定の貸出中商品はありません。');
+  // すべて該当なしなら簡易通知
+  if (overdue.length === 0 && soon.length === 0 && noDate.length === 0) {
+    sendLineWorksMessage('【週次レポート】要確認の貸出商品はありません。');
     return;
   }
 
-  let msg = '【週次レポート】返却期限未設定の貸出中商品（' + targets.length + '点）';
-  targets.forEach(function(d, i) {
-    msg += '\n\n' + (i + 1) + '. [' + (d.labelId || d.id) + '] ' + d.name;
-    msg += '\n　貸出先: ' + (d.loanTo || '未設定');
-    if (d.salesRep) msg += '\n　営業担当: ' + d.salesRep;
-  });
+  var msg = '【週次レポート】貸出状況確認（' + todayStr + '）';
+
+  if (overdue.length > 0) {
+    msg += '\n\n■ 返却期限超過（' + overdue.length + '件）';
+    overdue.forEach(function(d, i) {
+      msg += '\n' + (i + 1) + '. [' + (d.labelId || d.id) + '] ' + d.name;
+      msg += '\n　貸出先: ' + (d.loanTo || '未設定') + ' / 期限: ' + d.returnDueDate;
+      if (d.salesRep) msg += ' / ' + d.salesRep;
+    });
+  }
+
+  if (soon.length > 0) {
+    msg += '\n\n■ もうすぐ期限・7日以内（' + soon.length + '件）';
+    soon.forEach(function(d, i) {
+      msg += '\n' + (i + 1) + '. [' + (d.labelId || d.id) + '] ' + d.name;
+      msg += '\n　貸出先: ' + (d.loanTo || '未設定') + ' / 期限: ' + d.returnDueDate;
+      if (d.salesRep) msg += ' / ' + d.salesRep;
+    });
+  }
+
+  if (noDate.length > 0) {
+    msg += '\n\n■ 返却期限未設定（' + noDate.length + '件）';
+    noDate.forEach(function(d, i) {
+      msg += '\n' + (i + 1) + '. [' + (d.labelId || d.id) + '] ' + d.name;
+      msg += '\n　貸出先: ' + (d.loanTo || '未設定');
+      if (d.salesRep) msg += ' / ' + d.salesRep;
+    });
+  }
 
   sendLineWorksMessage(msg);
+}
+
+// ─── beaufield-auth 認証 ────────────────────────────────────
+
+/**
+ * getAuthUsers: lendingアプリにアクセス権があるユーザー一覧を返す（ログイン画面の名前グリッド用）
+ * 出力: { users: [{ user_id, name }] }
+ */
+function getAuthUsers() {
+  var authSs    = SpreadsheetApp.openById(AUTH_SHEET_ID);
+  var roleRows  = authSs.getSheetByName('user_app_roles').getDataRange().getValues();
+  var authRows  = authSs.getSheetByName('users').getDataRange().getValues();
+
+  // lendingのアクセス権があるuser_idを収集
+  var accessIds = new Set();
+  for (var i = 1; i < roleRows.length; i++) {
+    if (roleRows[i][1] === APP_NAME && roleRows[i][2] !== 'none') {
+      accessIds.add(String(roleRows[i][0]));
+    }
+  }
+
+  // アクティブなユーザーのみ返す
+  var users = [];
+  for (var i = 1; i < authRows.length; i++) {
+    var row = authRows[i];
+    if (accessIds.has(String(row[0])) && (row[3] === true || row[3] === 'TRUE')) {
+      users.push({ user_id: String(row[0]), name: String(row[1]) });
+    }
+  }
+  return { users: users };
+}
+
+/**
+ * login: 名前選択 + PIN で認証する（beaufield-auth を使用）
+ * 入力: { user_id, pin }
+ * 出力: { user_id, name, role }
+ */
+function login(data) {
+  var userId = data.user_id;
+  var pin    = data.pin;
+  if (!userId || pin === undefined || pin === null || pin === '') {
+    throw new Error('user_idとpinは必須です');
+  }
+
+  var authSs  = SpreadsheetApp.openById(AUTH_SHEET_ID);
+  var pinStr  = String(pin).padStart(4, '0');
+
+  // Step 1: user_id + PIN を照合
+  var authRows = authSs.getSheetByName('users').getDataRange().getValues();
+  var authUser = null;
+  for (var i = 1; i < authRows.length; i++) {
+    var row = authRows[i];
+    if (String(row[0]) === userId && (row[3] === true || row[3] === 'TRUE')) {
+      if (String(row[2]).padStart(4, '0') !== pinStr) throw new Error('PINが正しくありません');
+      authUser = { user_id: String(row[0]), name: String(row[1]) };
+      break;
+    }
+  }
+  if (!authUser) throw new Error('ユーザーが見つかりません');
+
+  // Step 2: アクセス権確認
+  var roleRows = authSs.getSheetByName('user_app_roles').getDataRange().getValues();
+  var role = null;
+  for (var i = 1; i < roleRows.length; i++) {
+    if (String(roleRows[i][0]) === userId && roleRows[i][1] === APP_NAME && roleRows[i][2] !== 'none') {
+      role = roleRows[i][2];
+      break;
+    }
+  }
+  if (!role) throw new Error('このアプリへのアクセス権限がありません');
+
+  return { user_id: authUser.user_id, name: authUser.name, role: role };
+}
+
+/**
+ * changePin: 本人によるPIN変更（beaufield-auth共通PIN）
+ * 入力: { user_id, current_pin, new_pin }
+ * 出力: { user_id }
+ */
+function changePin(data) {
+  var userId     = data.user_id;
+  var currentPin = data.current_pin;
+  var newPin     = data.new_pin;
+
+  if (!userId || currentPin === undefined || currentPin === null || !newPin) {
+    throw new Error('user_id、current_pin、new_pinは必須です');
+  }
+  if (!/^\d{4}$/.test(String(newPin))) throw new Error('新しいPINは4桁の数字を指定してください');
+
+  var authSs = SpreadsheetApp.openById(AUTH_SHEET_ID);
+  var sheet  = authSs.getSheetByName('users');
+  var rows   = sheet.getDataRange().getValues();
+
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(userId)) {
+      if (String(rows[i][2]).padStart(4, '0') !== String(currentPin).padStart(4, '0')) {
+        throw new Error('現在のPINが正しくありません');
+      }
+      sheet.getRange(i + 1, 3).setValue(String(newPin));
+      return { user_id: String(userId) };
+    }
+  }
+  throw new Error('ユーザーが見つかりません');
 }
 
 // ─── テスト用関数（GASエディタから手動実行） ────────────────
