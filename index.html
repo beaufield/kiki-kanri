@@ -620,7 +620,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.7.1';
 
 // ========== DATA STORE ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec';
@@ -1106,7 +1106,10 @@ function renderHome() {
   return `
   <div class="header">
     <h1>ビューフィールド貸出管理</h1>
-    <span style="font-size:12px;opacity:0.8;">${today().replace(/-/g,'/')}</span>
+    <div style="text-align:right;line-height:1.5;">
+      <div style="font-size:13px;font-weight:600;">${currentUser ? currentUser.name : ''}</div>
+      <div style="font-size:11px;opacity:0.7;">${today().replace(/-/g,'/')}</div>
+    </div>
   </div>
   <div class="content">
     <div class="stats">
