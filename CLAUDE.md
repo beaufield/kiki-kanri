@@ -8,14 +8,26 @@
 - **フロントエンド**: `index.html`（単一ファイルSPA / CSS + HTML + Vanilla JS）
 - **バックエンド**: Google Apps Script (GAS)
 - **DB**: Google Spreadsheet
+- **認証**: beaufield-auth（共通PIN認証）
 - **通知**: LINE WORKS Bot Webhook
-- **バージョン**: 1.5.0
+- **現行バージョン**: index.html v1.7.0 / Code.gs GAS 1.7.0
 
 ## 重要なURL・ID
 - **GAS API URL**: `https://script.google.com/macros/s/AKfycbzWQEPQ89DwT7n38vtLFf1COx0rz13-qKC7GM1dZBiEBYP5GV5H_3J-Olz_rR2ckr4o/exec`
 - **Spreadsheet ID**: `1o12RSbRWmNsiEjVPCb2dIjyw4U4Ntn47-6Lc80E_jvk`
 - **LINE WORKS Webhook URL**: `https://webhook.worksmobile.com/message/bf4bbf8b-e26f-4760-b2f2-5ea20b4cc025`
 - **GitHub**: `https://github.com/beaufield/kiki-kanri`
+
+## beaufield-auth 共通認証
+- **概要**: 全Beaufieldアプリ共通のPIN認証。ユーザー・権限を一元管理
+- **Spreadsheet ID**: `1cCQn16ubEN_Af7XWw8KerBscZtFomBnXHjIIiZUr6V8`
+- **APP_NAME**: `'lending'`
+- **ロール**: admin（前島崇志のみ）/ user（全員）
+- **ログインフロー**: 名前グリッドで選択 → 4桁PINを入力
+- **セッション**: localStorage（`kiki_session_v1`）、30日保持
+- **PIN変更**: 設定タブ → 「PINを変更する」（全アプリ共通PIN）
+- **GASアクション**: `getAuthUsers` / `login` / `changePin`
+- **ユーザー順序**: beaufield-auth の `users` シートの行順で表示される
 
 ## Spreadsheetシート構成
 - `DeviceMaster` — 商品マスタ
@@ -33,7 +45,7 @@
 - メーカーマスタ管理（CRUD）
 - 商品一覧のメーカーフィルター（タブ＋サブフィルター）
 - 画像アップロード（Google Drive、Base64→GAS uploadImageアクション）
-- 操作者記録・localStorage保持（lastOperator）
+- 操作者記録（ログインユーザーから自動取得、担当者選択UI廃止）
 - 貸出期限アラートバナー（3日前警告・期限超過）
 - 重複サロン警告トースト
 - 検索強化（営業担当名含む）
