@@ -4,9 +4,9 @@
 // 更新日: 2026-04-02
 // ============================================================
 
-const VERSION   = 'GAS 1.7.0';
-const SHEET_ID  = '1o12RSbRWmNsiEjVPCb2dIjyw4U4Ntn47-6Lc80E_jvk';
-const LINEWORKS_WEBHOOK_URL = 'https://webhook.worksmobile.com/message/bf4bbf8b-e26f-4760-b2f2-5ea20b4cc025';
+const VERSION  = 'GAS 1.8.0';
+const SHEET_ID = '1o12RSbRWmNsiEjVPCb2dIjyw4U4Ntn47-6Lc80E_jvk';
+// LINE WORKS Webhook URLはスクリプトプロパティで管理（設定キー: LINEWORKS_WEBHOOK）
 
 // beaufield-auth 共通認証設定
 const AUTH_SHEET_ID = '1cCQn16ubEN_Af7XWw8KerBscZtFomBnXHjIIiZUr6V8';
@@ -344,7 +344,9 @@ function assignLabel(data) {
 // ─── LINE WORKS通知 ────────────────────────────────────────
 function sendLineWorksMessage(text) {
   try {
-    UrlFetchApp.fetch(LINEWORKS_WEBHOOK_URL, {
+    const webhookUrl = PropertiesService.getScriptProperties().getProperty('LINEWORKS_WEBHOOK');
+    if (!webhookUrl) { console.error('LINEWORKS_WEBHOOKが未設定です（スクリプトプロパティを確認）'); return; }
+    UrlFetchApp.fetch(webhookUrl, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify({ body: { text: text } })
