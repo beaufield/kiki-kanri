@@ -620,7 +620,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.8.2';
+const APP_VERSION = '1.8.3';
 const PORTAL_URL  = 'https://beaufield.github.io/beaufield-dev/';
 
 // ========== DATA STORE ==========
@@ -1114,9 +1114,12 @@ function renderHome() {
     d.status === '貸出中' && d.returnDueDate && d.returnDueDate > todayStr && d.returnDueDate <= limitStr
   );
   const makerOverdueDevices = db.devices.filter(d => isMakerOverdue(d));
+  const makerLimit = new Date(todayStr);
+  makerLimit.setDate(makerLimit.getDate() + 7);
+  const makerLimitStr = makerLimit.toISOString().split('T')[0];
   const makerSoonDevices = db.devices.filter(d =>
     d.type === 'メーカー借入' && d.makerReturnDueDate &&
-    d.makerReturnDueDate >= todayStr && d.makerReturnDueDate <= limitStr &&
+    d.makerReturnDueDate >= todayStr && d.makerReturnDueDate <= makerLimitStr &&
     d.status !== '廃棄' && d.status !== 'メーカー返却済'
   );
 
@@ -1161,7 +1164,7 @@ function renderHome() {
     ${makerSoonDevices.length > 0 ? `
     <div class="warning-banner" onclick="navigate('devices', {filter:'maker'})">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <div class="warning-banner-text">メーカー返却期限が3日以内の商品が ${makerSoonDevices.length} 件あります</div>
+      <div class="warning-banner-text">メーカー返却期限が7日以内の商品が ${makerSoonDevices.length} 件あります</div>
       <span style="color:#92400e;font-size:18px;">›</span>
     </div>` : ''}
 
