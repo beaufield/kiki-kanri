@@ -620,7 +620,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.8.4';
+const APP_VERSION = '1.8.5';
 const PORTAL_URL  = 'https://beaufield.github.io/beaufield-dev/';
 
 // ========== DATA STORE ==========
@@ -1985,7 +1985,7 @@ function renderEditDevice() {
     </div>
     <div class="form-section" id="edit-maker-due-section" style="${isMaker ? '' : 'display:none;'}">
       <div class="form-label">メーカー返却期限 <span style="color:var(--text-sub);font-weight:400;">(未定の場合は空欄)</span></div>
-      <input class="form-input" id="f-edit-maker-due" type="date" value="${device.makerReturnDueDate || ''}">
+      <input class="form-input" id="f-edit-maker-due" type="date" value="${device.makerReturnDueDate ? String(device.makerReturnDueDate).split('T')[0].replace(/\//g,'-') : ''}">
     </div>
     <div class="form-section">
       <div class="form-label">備考（付属品等）</div>
