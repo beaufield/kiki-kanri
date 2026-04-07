@@ -620,7 +620,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.8.3';
+const APP_VERSION = '1.8.4';
 const PORTAL_URL  = 'https://beaufield.github.io/beaufield-dev/';
 
 // ========== DATA STORE ==========
@@ -1209,6 +1209,31 @@ function renderHome() {
         <p>現在貸出中の商品はありません</p>
       </div>
     </div>`}
+
+    ${(() => {
+      const makerDueDevices = db.devices
+        .filter(d => d.type === 'メーカー借入' && d.makerReturnDueDate && d.status !== '廃棄' && d.status !== 'メーカー返却済')
+        .sort((a, b) => a.makerReturnDueDate.localeCompare(b.makerReturnDueDate));
+      if (makerDueDevices.length === 0) return '';
+      return `
+    <div class="section-title">メーカー返却期限あり</div>
+    <div class="card">
+      ${makerDueDevices.map(d => {
+        const overdue = isMakerOverdue(d);
+        const dateColor = overdue ? 'color:var(--danger);font-weight:700;' : '';
+        return `
+      <div class="device-item" onclick="navigate('deviceDetail', {deviceId:${d.id}})">
+        <div class="device-icon ${d.status==='貸出中'?'loan':'in'}">🔧</div>
+        <div class="device-info">
+          <div class="device-name">${d.name}</div>
+          <div class="device-meta" style="${dateColor}">${fmtDate(d.makerReturnDueDate)} 返却期限${overdue ? ' ⚠️' : ''}</div>
+          <div class="device-label">${d.labelId}</div>
+        </div>
+        <span class="badge ${overdue?'overdue':d.status==='貸出中'?'loan':'in'}">${overdue?'期限超過':d.status}</span>
+      </div>`;
+      }).join('')}
+    </div>`;
+    })()}
   </div>
   ${renderNav()}`;
 }
