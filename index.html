@@ -620,7 +620,7 @@
 
 <script>
 // ========== APP VERSION ==========
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 const PORTAL_URL  = 'https://beaufield.github.io/beaufield-dev/';
 
 // ========== DATA STORE ==========
@@ -1220,7 +1220,7 @@ function renderDevices() {
     devices.sort((a, b) => a.returnDueDate.localeCompare(b.returnDueDate));
   }
   if (filter === 'nodate') devices = devices.filter(d => d.status === '貸出中' && !d.returnDueDate);
-  if (filter === 'maker') devices = devices.filter(d => d.type === 'メーカー借入' && d.status === '貸出中');
+  if (filter === 'maker') devices = devices.filter(d => d.type === 'メーカー借入');
   if (filter === 'byMaker') {
     if (makerFilter) devices = devices.filter(d => d.maker === makerFilter);
   }
