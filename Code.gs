@@ -1,25 +1,106 @@
 // ============================================================
 // ビューフィールド 貸出管理アプリ — バックエンド
-// VERSION: GAS 1.7.0
-// 更新日: 2026-04-02
+// VERSION: GAS 1.9.0
+// 更新日: 2026-04-25
 // ============================================================
 
-const VERSION  = 'GAS 1.8.0';
+const VERSION  = 'GAS 1.9.0';
 const SHEET_ID = '1o12RSbRWmNsiEjVPCb2dIjyw4U4Ntn47-6Lc80E_jvk';
 // LINE WORKS Webhook URLはスクリプトプロパティで管理（設定キー: LINEWORKS_WEBHOOK）
 
 // beaufield-auth 共通認証設定
-const AUTH_SHEET_ID = '1cCQn16ubEN_Af7XWw8KerBscZtFomBnXHjIIiZUr6V8';
-const APP_NAME      = 'lending';
+const AUTH_SHEET_ID      = '1cCQn16ubEN_Af7XWw8KerBscZtFomBnXHjIIiZUr6V8';
+const APP_NAME           = 'lending';
+const SESSION_DAYS       = 30;
+const CACHE_TTL_SESSION  = 900; // 15分（CacheService保持秒数）
 const ss = SpreadsheetApp.openById(SHEET_ID);
+
+// ─── セッション検証 ──────────────────────────────────────────
+// beaufield-auth の sessions シートでトークンを照合する
+// CacheService で 15 分間キャッシュしてシート読み込みを削減
+// 戻り値: { valid: true, user_id } または { valid: false }
+function validateSession(token) {
+  if (!token) return { valid: false };
+
+  const cache    = CacheService.getScriptCache();
+  const cacheKey = 'sess_' + token.slice(-32);
+  const cached   = cache.get(cacheKey);
+  if (cached !== null) {
+    try { return JSON.parse(cached); } catch(e) {}
+  }
+
+  try {
+    const authSs = SpreadsheetApp.openById(AUTH_SHEET_ID);
+    const sh     = authSs.getSheetByName('sessions');
+    if (!sh) return { valid: false };
+
+    const data = sh.getDataRange().getValues();
+    const now  = Date.now();
+
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === token) {
+        if (Number(data[i][2]) < now) {
+          sh.deleteRow(i + 1);
+          const r = { valid: false };
+          cache.put(cacheKey, JSON.stringify(r), 60);
+          return r;
+        }
+        const r = { valid: true, user_id: String(data[i][1]) };
+        cache.put(cacheKey, JSON.stringify(r), CACHE_TTL_SESSION);
+        return r;
+      }
+    }
+  } catch(e) {
+    Logger.log('validateSession error: ' + e);
+  }
+
+  const r = { valid: false };
+  cache.put(cacheKey, JSON.stringify(r), 60);
+  return r;
+}
+
+// ─── セッション保存（beaufield-auth の sessions シートに書き込む） ─
+function _saveSession(authSs, token, userId, expiresAt) {
+  let sh = authSs.getSheetByName('sessions');
+  if (!sh) {
+    sh = authSs.insertSheet('sessions');
+    sh.appendRow(['token', 'user_id', 'expires_at']);
+  }
+
+  // 期限切れセッションを遅延クリーンアップ
+  const data = sh.getDataRange().getValues();
+  const now  = Date.now();
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (Number(data[i][2]) < now) sh.deleteRow(i + 1);
+  }
+
+  sh.appendRow([token, userId, expiresAt]);
+}
+
+// ─── レスポンスヘルパー ─────────────────────────────────────
+function _respond(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
 
 // ─── エントリーポイント（POST） ───────────────────────────────
 function doPost(e) {
   try {
     const action = e.parameter.action;
-    const data = JSON.parse(e.parameter.data);
-    let result;
+    const data   = JSON.parse(e.parameter.data);
+    const token  = e.parameter.session_token || '';
 
+    // login / getAuthUsers は認証不要（ログイン画面用）
+    const PUBLIC_ACTIONS = ['login', 'getAuthUsers'];
+    if (!PUBLIC_ACTIONS.includes(action)) {
+      const auth = validateSession(token);
+      if (!auth.valid) {
+        return _respond({ status: 'error', error: 'SESSION_INVALID' });
+      }
+    }
+
+    let result;
     if      (action === 'saveDevice')          result = saveDevice(data);
     else if (action === 'saveLoan')            result = saveLoan(data);
     else if (action === 'registerDevice')      result = registerDevice(data);
@@ -37,18 +118,19 @@ function doPost(e) {
     else if (action === 'changePin')           result = changePin(data);
     else result = { error: 'Unknown action: ' + action };
 
-    return ContentService
-      .createTextOutput(JSON.stringify({ status: 'ok', result }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return _respond({ status: 'ok', result });
   } catch(err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ status: 'error', error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return _respond({ status: 'error', error: err.toString() });
   }
 }
 
 // ─── エントリーポイント（GET） ───────────────────────────────
 function doGet(e) {
+  const token = (e && e.parameter && e.parameter.session_token) ? e.parameter.session_token : '';
+  const auth  = validateSession(token);
+  if (!auth.valid) {
+    return _respond({ status: 'error', error: 'SESSION_INVALID' });
+  }
   const result = getAllData();
   return ContentService
     .createTextOutput(JSON.stringify(result))
@@ -66,14 +148,21 @@ function getAllData() {
 }
 
 // ─── 汎用シート取得（ヘッダー付き配列をオブジェクト配列に変換） ─
+// ヘッダー名はトリムして使用（余分なスペースによるキー不一致を防止）
+// Date オブジェクトは YYYY-MM-DD 文字列に変換（日本時間基準）
 function getSheet(name) {
   const sheet = ss.getSheetByName(name);
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) return [];
-  const headers = data[0];
+  const headers = data[0].map(h => String(h).trim());
   return data.slice(1).map(row => {
     const obj = {};
-    headers.forEach((h, i) => obj[h] = row[i]);
+    headers.forEach((h, i) => {
+      const val = row[i];
+      obj[h] = val instanceof Date
+        ? Utilities.formatDate(val, 'Asia/Tokyo', 'yyyy-MM-dd')
+        : val;
+    });
     return obj;
   });
 }
@@ -360,18 +449,31 @@ function sendLineWorksMessage(text) {
 // ─── 週次レポート（毎週火曜9:00にトリガー登録） ─────────────
 // ① 返却期限超過 ② 7日以内に期限 ③ 返却期限未設定 をLINE WORKSに通知する
 function sendWeeklyReport() {
-  const devices = getSheet('DeviceMaster');
-  const todayStr = new Date().toISOString().split('T')[0];
-  const limit = new Date(todayStr);
-  limit.setDate(limit.getDate() + 7);
-  const limitStr = limit.toISOString().split('T')[0];
+  const todayStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  const limitDate = new Date();
+  limitDate.setDate(limitDate.getDate() + 7);
+  const limitStr = Utilities.formatDate(limitDate, 'Asia/Tokyo', 'yyyy-MM-dd');
 
-  // ① 期限超過（返却期限が今日以前）
+  // DeviceMasterを取得し、各フィールドを正規化する
+  // - status: 余分なスペースを除去（手動編集で混入しやすい）
+  // - returnDueDate: DateオブジェクトはYYYY-MM-DD変換、スラッシュ区切りはハイフンに統一
+  //   （'2026/03/01' < '2026-04-21' が文字コード順でfalseになるため比較が狂う）
+  const devices = getSheet('DeviceMaster').map(function(d) {
+    if (d.status !== undefined) d.status = String(d.status).trim();
+    if (d.returnDueDate instanceof Date) {
+      d.returnDueDate = Utilities.formatDate(d.returnDueDate, 'Asia/Tokyo', 'yyyy-MM-dd');
+    } else if (d.returnDueDate) {
+      d.returnDueDate = String(d.returnDueDate).trim().replace(/\//g, '-');
+    }
+    return d;
+  });
+
+  // ① 期限超過（返却期限が今日より前）
   const overdue = devices.filter(function(d) {
     return d.status === '貸出中' && d.returnDueDate && d.returnDueDate < todayStr;
   }).sort(function(a, b) { return a.returnDueDate.localeCompare(b.returnDueDate); });
 
-  // ② 7日以内に期限（今日より後〜7日以内）
+  // ② 7日以内に期限（今日〜7日以内）
   const soon = devices.filter(function(d) {
     return d.status === '貸出中' && d.returnDueDate && d.returnDueDate >= todayStr && d.returnDueDate <= limitStr;
   }).sort(function(a, b) { return a.returnDueDate.localeCompare(b.returnDueDate); });
@@ -488,7 +590,12 @@ function login(data) {
   }
   if (!role) throw new Error('このアプリへのアクセス権限がありません');
 
-  return { user_id: authUser.user_id, name: authUser.name, role: role };
+  // Step 3: サーバー側セッショントークン発行（beaufield-auth sessions シートに保存）
+  var token     = Utilities.getUuid();
+  var expiresAt = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
+  _saveSession(authSs, token, authUser.user_id, expiresAt);
+
+  return { user_id: authUser.user_id, name: authUser.name, role: role, session_token: token, expires: expiresAt };
 }
 
 /**
