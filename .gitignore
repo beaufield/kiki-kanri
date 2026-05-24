@@ -5,3 +5,10 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# 機密情報・内部ドキュメント（GitHubに公開しない）
+CLAUDE.md
+*.pdf
+*.csv
+*.docx
+*.xlsx
